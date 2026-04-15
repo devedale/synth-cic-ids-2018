@@ -86,24 +86,29 @@ JAVA_VER="$(java -version 2>&1 | head -1)"
 log "Java: ${JAVA_VER}"
 
 # ---------------------------------------------------------------------------
-# Python venv — saltato su Google Colab (ensurepip non disponibile)
+# Python venv — saltato se ensurepip non disponibile (es. Google Colab)
 # ---------------------------------------------------------------------------
 ensure_cmd python3
 
-IN_COLAB=false
-if python3 -c "import google.colab" 2>/dev/null; then
-  IN_COLAB=true
+VENV_ACTIVE=false
+
+if [[ ! -f "${VENV_DIR}/bin/activate" ]]; then
+  log "Creo virtual environment in ${VENV_DIR}"
+  if python3 -m venv "$VENV_DIR" 2>/dev/null; then
+    log "Virtual environment creato"
+  else
+    log "WARNING: creazione venv fallita (ensurepip non disponibile?) — uso Python di sistema"
+    rm -rf "$VENV_DIR"
+  fi
 fi
 
-if [[ "$IN_COLAB" == "true" ]]; then
-  log "Ambiente Google Colab rilevato — salto creazione venv, uso Python di sistema"
-else
-  if [[ ! -d "$VENV_DIR" ]]; then
-    log "Creo virtual environment in ${VENV_DIR}"
-    python3 -m venv "$VENV_DIR"
-  fi
+if [[ -f "${VENV_DIR}/bin/activate" ]]; then
   # shellcheck disable=SC1091
   source "${VENV_DIR}/bin/activate"
+  VENV_ACTIVE=true
+  log "Virtual environment attivato"
+else
+  log "Uso Python di sistema: $(python3 --version)"
 fi
 
 log "Aggiorno pip/setuptools/wheel"

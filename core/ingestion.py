@@ -21,6 +21,7 @@ from configs.settings import (
     CICFLOWMETER_ROOT,
     DAY_TO_ARCHIVE,
     FLOW_CSV_DIR,
+    INGEST_SAMPLE_SIZE,
     JAVA8_HOME,
     JAVA_XMX,
     PCAP_DIR,
@@ -28,7 +29,7 @@ from configs.settings import (
     S3_PREFIX,
     S3_REGION,
 )
-from core.labeling import apply as label_apply
+from core.labeling import label_day_csvs
 
 
 class Ingestion:
@@ -276,25 +277,16 @@ class Ingestion:
         if not flow_csvs:
             raise FileNotFoundError(f"No *_Flow.csv generated for {day}")
 
-        frames = []
-        for csv_path in flow_csvs:
-            try:
-                frames.append(pd.read_csv(csv_path, low_memory=False))
-            except Exception as exc:
-                print(f"[ingestion] Could not read {csv_path.name}: {exc}")
-
-        if not frames:
-            raise RuntimeError(f"All flow CSV files failed to load for {day}")
-
-        merged = pd.concat(frames, ignore_index=True)
-        labeled = label_apply(merged, day=day, schedule_yaml=self.schedule_yaml)
-
         day_cache = self._day_cache_dir(day)
         day_cache.mkdir(parents=True, exist_ok=True)
 
-        benign_mask = labeled["Label"].astype(str).str.lower() == "benign"
-        labeled[benign_mask].to_csv(day_cache / "benign_records.csv", index=False)
-        labeled[~benign_mask].to_csv(day_cache / "attack_records.csv", index=False)
+        # Spark legge tutti i CSV in parallelo (MAP), poi scrive benign/attack (REDUCE)
+        label_day_csvs(
+            csv_dir=csv_day_dir,
+            day=day,
+            schedule_yaml=self.schedule_yaml,
+            out_dir=day_cache,
+        )
 
     def _load_day_cache(self, day: str) -> pd.DataFrame:
         day_dir = self._day_cache_dir(day)
