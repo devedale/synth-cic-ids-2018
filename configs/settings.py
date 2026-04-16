@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Minimal settings for the autonomous nnids_pipeline package."""
+"""Settings for the synth-cic-ids-2018 data generator."""
 
 from pathlib import Path
 
@@ -10,58 +10,100 @@ PROJECT_ROOT = PIPELINE_ROOT.parent
 # Ingestion and day selection
 DAYS = [
         # "Wednesday-14-02-2018",     # FTP-BruteForce, SSH-BruteForce
-        # "Thursday-15-02-2018",    # DoS-GoldenEye, DoS-Slowloris
-        # "Friday-16-02-2018",      # DoS-SlowHTTPTest, DoS-Hulk
+        "Thursday-15-02-2018",    # DoS-GoldenEye, DoS-Slowloris
+        "Friday-16-02-2018",      # DoS-SlowHTTPTest, DoS-Hulk
         # "Tuesday-20-02-2018",       # DDoS-LOIC-HTTP, DDoS-LOIC-UDP
         # "Wednesday-21-02-2018",   # DDoS-LOIC-UDP, DDoS-HOIC
         #"Thursday-22-02-2018",    # Web-BruteForce, Web-XSS, Web-SQLi
         #"Friday-23-02-2018",      # Web attacks (continua)
         # "Wednesday-28-02-2018",   # Infiltration
-        "Thursday-01-03-2018",    # Infiltration (continua)
-        "Friday-02-03-2018",      # Bot
-
+        #"Thursday-01-03-2018",    # Infiltration (continua)
+        #"Friday-02-03-2018",      # Bot
 ]
 FORCE_REDOWNLOAD = False
 
-# S3 source for CIC-IDS2018 archives
+# S3 source for CIC-IDS2018 processed CSVs
 S3_BUCKET = "cse-cic-ids2018"
 S3_REGION = "ca-central-1"
-S3_PREFIX = "Original Network Traffic and Log data/"
+S3_PREFIX = "Processed Traffic Data for ML Algorithms/"
 
-# Tuesday archive is .rar, all the others are .zip
-DAY_TO_ARCHIVE = {
-	"Wednesday-14-02-2018": "pcap.zip",
-	"Thursday-15-02-2018": "pcap.zip",
-	"Friday-16-02-2018": "pcap.zip",
-	"Tuesday-20-02-2018": "pcap.rar",
-	"Wednesday-21-02-2018": "pcap.zip",
-	"Thursday-22-02-2018": "pcap.zip",
-	"Friday-23-02-2018": "pcap.zip",
-	"Wednesday-28-02-2018": "pcap.zip",
-	"Thursday-01-03-2018": "pcap.zip",
-	"Friday-02-03-2018": "pcap.zip",
+DAY_TO_CSV = {
+	"Wednesday-14-02-2018": "Wednesday-14-02-2018_TrafficForML_CICFlowMeter.csv",
+	"Thursday-15-02-2018": "Thursday-15-02-2018_TrafficForML_CICFlowMeter.csv",
+	"Friday-16-02-2018": "Friday-16-02-2018_TrafficForML_CICFlowMeter.csv",
+	"Tuesday-20-02-2018": "Thuesday-20-02-2018_TrafficForML_CICFlowMeter.csv",
+	"Wednesday-21-02-2018": "Wednesday-21-02-2018_TrafficForML_CICFlowMeter.csv",
+	"Thursday-22-02-2018": "Thursday-22-02-2018_TrafficForML_CICFlowMeter.csv",
+	"Friday-23-02-2018": "Friday-23-02-2018_TrafficForML_CICFlowMeter.csv",
+	"Wednesday-28-02-2018": "Wednesday-28-02-2018_TrafficForML_CICFlowMeter.csv",
+	"Thursday-01-03-2018": "Thursday-01-03-2018_TrafficForML_CICFlowMeter.csv",
+	"Friday-02-03-2018": "Friday-02-03-2018_TrafficForML_CICFlowMeter.csv",
 }
 
 # Paths
-ARCHIVES_DIR = PIPELINE_ROOT / "data" / "s3_archives"
-PCAP_DIR = PIPELINE_ROOT / "data" / "pcaps"
-FLOW_CSV_DIR = PIPELINE_ROOT / "data" / "cicflow_csv"
+CSVS_DIR = PIPELINE_ROOT / "data" / "s3_csvs"
 CACHE_DIR = PIPELINE_ROOT / "preprocessed_cache"
+# Threat Intelligence Configuration
+# =======================================================================
+# FEED TEST SUMMARY (Apr 2026):
+# The active feeds combine to generate a dynamic pool of unique 
+# strictly malicious IPv4 addresses used dynamically to shape the attacks.
+# =======================================================================
+THREAT_INTEL_FEEDS = {
+    # 1. ABUSEIPDB BLOCKLIST (ACTIVE MODE)
+    # Category: Worst offenders of the internet, updated daily from AbuseIPDB.
+    # Features ~170,000+ highly verified malicious IPs active in the last 30 days.
+    "abuseipdb_30d": {
+        "url": "https://raw.githubusercontent.com/borestad/blocklist-abuseipdb/main/abuseipdb-s100-30d.ipv4",
+        "enabled": True,
+    }
+}
 
-# CICFlowMeter installation in the main project root
-CICFLOWMETER_ROOT = PROJECT_ROOT / "CICFlowMeter"
+# =======================================================================
+# Benign Data Configuration (Whitelists)
+# Fetching IPs from the Borestad iplists repository to be used as trusted 
+# endpoints for benign traffic mapping.
+# =======================================================================
+BENIGN_INTEL_FEEDS = {
+    "googlebot": {
+        "url": "https://raw.githubusercontent.com/borestad/iplists/refs/heads/main/google/googlebot.ipv4",
+        "enabled": True,
+    },
+    "bingbot": {
+        "url": "https://raw.githubusercontent.com/borestad/iplists/refs/heads/main/bing/bingbot.ipv4",
+        "enabled": True,
+    },
+    "apple": {
+        "url": "https://raw.githubusercontent.com/borestad/iplists/refs/heads/main/apple/apple.ipv4",
+        "enabled": True,
+    },
+    "office365": {
+        "url": "https://raw.githubusercontent.com/borestad/iplists/refs/heads/main/email/office365-exchange-smtp.ipv4",
+        "enabled": True,
+    }
+}
 
-# Java settings required by jnetpcap
-JAVA8_HOME = "/usr/lib/jvm/java-1.8.0-openjdk-amd64"
-JAVA_XMX = "2g"
+# =======================================================================
+# Custom Static IP Pools
+# These arrays allow you to manually inject specific IPs into the pipeline
+# without relying entirely on external feeds.
+# =======================================================================
 
-# Preprocessing
-CACHE_ENABLED = False  # preprocessed.csv is never read, no need to save it
-SAMPLE_SIZE = 20000
+BASE_MALICIOUS_IPS = [
+    # Add your own known-bad test IPs here. They will be merged with the intel feeds.
+    "198.51.100.100", 
+    "203.0.113.50", 
+    "192.0.2.200", 
+]
 
-# Max rows per day kept during ingestion (applied before concat to cap RAM usage).
-# Set to None to keep all rows (risk: OOM on large days).
-INGEST_SAMPLE_SIZE = 500_000
+BASE_GOOD_PUBLIC_IPS = [
+    # Verified safe infrastructure used to simulate normal public internet traffic
+    "8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1", 
+    "9.9.9.9", "149.112.112.112", "208.67.222.222", "208.67.220.220",
+    "142.250.0.0", "104.16.0.0", "151.101.1.69"
+]
 
-# Labeling
-ATTACK_SCHEDULE_YAML = PIPELINE_ROOT / "configs" / "attack_schedule.yaml"
+# Output settings
+CACHE_ENABLED = True
+SAMPLING_ENABLED = False
+SAMPLE_SIZE = 500000

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Minimal preprocessing stage for nnids_pipeline."""
+"""Minimal preprocessing stage for the CIC-IDS-2018 Data Generator."""
 
 from pathlib import Path
 from typing import Optional, Union
@@ -60,7 +60,7 @@ def preprocess(
 
 def clean_temp(base_dir: Path) -> None:
     """Cleanup temporary extraction and flow-csv folders used by ingestion."""
-    for rel in ("data/pcaps", "data/cicflow_csv"):
+    for rel in ("data/s3_csvs",):
         target = base_dir / rel
         if target.exists():
             for path in sorted(target.rglob("*"), reverse=True):
