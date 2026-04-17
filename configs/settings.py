@@ -9,16 +9,16 @@ PROJECT_ROOT = PIPELINE_ROOT.parent
 
 # Ingestion and day selection
 DAYS = [
-        # "Wednesday-14-02-2018",     # FTP-BruteForce, SSH-BruteForce
+        "Wednesday-14-02-2018",     # FTP-BruteForce, SSH-BruteForce
         "Thursday-15-02-2018",    # DoS-GoldenEye, DoS-Slowloris
         "Friday-16-02-2018",      # DoS-SlowHTTPTest, DoS-Hulk
-        # "Tuesday-20-02-2018",       # DDoS-LOIC-HTTP, DDoS-LOIC-UDP
-        # "Wednesday-21-02-2018",   # DDoS-LOIC-UDP, DDoS-HOIC
-        #"Thursday-22-02-2018",    # Web-BruteForce, Web-XSS, Web-SQLi
-        #"Friday-23-02-2018",      # Web attacks (continua)
-        # "Wednesday-28-02-2018",   # Infiltration
-        #"Thursday-01-03-2018",    # Infiltration (continua)
-        #"Friday-02-03-2018",      # Bot
+        "Tuesday-20-02-2018",       # DDoS-LOIC-HTTP, DDoS-LOIC-UDP
+        "Wednesday-21-02-2018",   # DDoS-LOIC-UDP, DDoS-HOIC
+        "Thursday-22-02-2018",    # Web-BruteForce, Web-XSS, Web-SQLi
+        "Friday-23-02-2018",      # Web attacks (continua)
+        "Wednesday-28-02-2018",   # Infiltration
+        "Thursday-01-03-2018",    # Infiltration (continua)
+        "Friday-02-03-2018",      # Bot
 ]
 FORCE_REDOWNLOAD = False
 
@@ -92,3 +92,20 @@ BASE_GOOD_PUBLIC_IPS = [
 CACHE_ENABLED = True
 SAMPLING_ENABLED = False
 SAMPLE_SIZE = 500000
+
+# ---------------------------------------------------------
+# MACHINE LEARNING OUT-OF-CORE SETTINGS
+# ---------------------------------------------------------
+
+# ML_CLASS_STRATEGY defines how the final dataset matrix is served dynamically.
+# Supported strategies natively loaded via `core/dataset_loader.py`:
+# - "raw"                   -> Retains 100% of rows and true original multi-class labels.
+# - "unsupervised"          -> Excludes all attacks, serves purely continuous "Benign" baseline traffic.
+# - "binary_collapse"       -> Casts all 14 attack subtypes under a single boolean 'Attack' umbrella label.
+# - "undersample_majority"  -> Binary collapse + mathematically undersamples majority class to hit TARGET_BENIGN_RATIO.
+
+ML_CLASS_STRATEGY = "undersample_majority"
+
+# Applies only when ML_CLASS_STRATEGY == "undersample_majority".
+# 0.5 means exact 50% Benign / 50% Attack distribution.
+TARGET_BENIGN_RATIO = 0.5

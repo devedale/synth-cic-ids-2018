@@ -29,17 +29,51 @@ def run(args):
     # Read the unified unified parquet chunks dynamically
     full_df = spark.read.parquet(*csv_paths)
     
+    # -------- Dataset Statistics Report (Cross-Tabulation) --------
+    stats_file = ing.base_dir / "data" / "dataset_statistics.csv"
+    if not stats_file.exists() and full_df.count() > 0:
+        print("\n[main] Generating Cross-Tabulated Dataset Statistics Report (First run)...")
+        # Generate the crosstab using PySpark (fast distributed action)
+        crosstab_df = full_df.crosstab("Label", "_source_day")
+        
+        # Convert to Pandas for computing margins and clean printing (matrix is extremely small, ~15x10)
+        crosstab_pd = crosstab_df.toPandas()
+        if not crosstab_pd.empty:
+            crosstab_pd.set_index("Label__source_day", inplace=True)
+            crosstab_pd.index.name = "Label"
+            
+            # Calculate right margin (Row Totals)
+            crosstab_pd["Total"] = crosstab_pd.sum(axis=1)
+            
+            # Calculate bottom margin (Column Totals)
+            crosstab_pd.loc["Total"] = crosstab_pd.sum(axis=0)
+            
+            stats_file.parent.mkdir(parents=True, exist_ok=True)
+            crosstab_pd.to_csv(stats_file)
+            print("\n[main] --- Dataset Distribution Statistics ---")
+            print(crosstab_pd.to_string())
+            print(f"----------------------------------------------\n[main] Saved to {stats_file}\n")
+    # -------------------------------------------------------------
+    
+    from core.dataset_loader import get_dataset
+    from configs.settings import ML_CLASS_STRATEGY, TARGET_BENIGN_RATIO
     from core.preprocessing import preprocess_spark
-    final_cache_target = Path(CACHE_DIR) / "final_preprocessed.parquet"
+    
+    print(f"\n[main] Applying Machine Learning Loader Strategy: {ML_CLASS_STRATEGY}")
+    
+    final_cache_target = Path(CACHE_DIR) / f"final_preprocessed_{ML_CLASS_STRATEGY}.parquet"
+    
+    # Lazily evaluate the specialized ML DataFrame request
+    ml_df = get_dataset(spark, str(Path(CACHE_DIR)), strategy=ML_CLASS_STRATEGY, target_benign_ratio=TARGET_BENIGN_RATIO)
     
     preproc_df = preprocess_spark(
-        full_df,
+        ml_df,
         sample_size=args.sample,
         cache=args.cache,
         cache_dir=final_cache_target,
     )
     
-    print("\n[main] End-to-End Pipeline execution completed.")
+    print("\n[main] End-to-End Dynamic Pipeline execution completed.")
     print(f"[main] Fully scaled and preprocessed dataset saved at: {final_cache_target}")
     
     clean_temp(ing.base_dir)

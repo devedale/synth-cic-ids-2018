@@ -226,6 +226,9 @@ class Ingestion:
         day_cache = self._day_cache_dir(day)
         day_cache.mkdir(parents=True, exist_ok=True)
         
+        # Tag origin day for ML statistics loader tracking before saving RAW block
+        df_processed = df_processed.withColumn("_source_day", F.lit(day))
+        
         df_processed.repartition(10).write.mode("overwrite").parquet(str(day_cache / "unified_records.parquet"))
             
         print(f"[ingestion] Saved unified Spark Parquet partition for day {day}\n")

@@ -41,10 +41,11 @@ graph TD
 
 | Component | Responsibility | Technical Stack |
 | :--- | :--- | :--- |
-| **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools, and injects Threat feed indicators (e.g. `198.51.100.1` for malicious classes). Repartitions into out-of-core `unified_records.parquet` outputs per day. | PySpark SQL, UDFs, Parquet |
-| **`core/preprocessing.py`** | Connects to the ingestion parquets, builds a Native PySpark Pipeline. Samples `df.sample()`, encodes the `Label` target column with `StringIndexer`, merges numerics via `VectorAssembler`, and normalizes ranges via `StandardScaler`. | PySpark MLlib |
-| **`configs/settings.py`** | Centralizes HTTP feeds configuration, local filesystem pointers, sample size settings, and threat intel thresholds. | Constants |
-| **`main.py`** | Entry-point script orchestrating Python context switching sequentially from PySpark Ingestion to PySpark Preprocessing. | Orchestrator |
+| **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools, and injects Threat feed indicators (e.g. `198.51.100.1`). Repartitions into out-of-core raw `unified_records.parquet` outputs per day, tagging each row with `_source_day`. | PySpark SQL, UDFs |
+| **`core/dataset_loader.py`** | **SOTA Feature Store**. Loads the RAW 40GB dataset lazily and applies virtual schema strategies on-the-fly (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`). Math-based undersampling targets ensure Class Weights are perfectly controllable without dataset duplication. | PySpark ML DataFrame |
+| **`core/preprocessing.py`** | Applies `StringIndexer` for Label encoding and native `StandardScaler` to the dynamic dataframe retrieved by the Loader. | PySpark MLlib |
+| **`configs/settings.py`** | Central declarative point. Configure `ML_CLASS_STRATEGY` to control the Loader shape remotely. | Constants |
+| **`main.py`** | Entry-point script orchestrating Python context switching sequentially. Also computationally dumps a `dataset_statistics.csv` Cross-Tabulation dataset distribution metric on first run. | Orchestrator |
 
 ---
 
@@ -65,8 +66,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Execution
-Run the system via the entry script. (By default, downloading the 5.3GB ZIP is automatic if `CSECICIDS2018_improved/` does not exist).
+### 2. Execution & Configurations
+Modify `configs/settings.py` to change `ML_CLASS_STRATEGY`. Available modes for ML Pipeline testing:
+- `"raw"` (For natively imbalanced XGBoost processing)
+- `"unsupervised"` (Pulls only Normal traffic for Autoencoders)
+- `"binary_collapse"` (Converts 14 attacks into 1 Boolean representation)
+- `"undersample_majority"` (Dynamically downsamples Benign traffic to equal Attack frequency)
+
+Run the system:
 ```bash
 python main.py
 ```
@@ -76,6 +83,10 @@ Optional CLI overrides:
 - `--force`: Ignore cached IP feeds and local parquets, rewriting everything.
 - `--sample`: Set integer to downsample the final table (e.g. `--sample 500000`)
 - `--no-cache`: Prevents saving the final Parquet back to the system disk.
+
+> [!TIP]
+> **Dataset Distribution Matrix**
+> On first pipeline execution, a PySpark Cross-Tabulation runs seamlessly generating `data/dataset_statistics.csv` printing the intersection of all ML Labels vs the specific extraction Day they appeared on, with horizontal/vertical Marginal counters.
 
 ---
 
