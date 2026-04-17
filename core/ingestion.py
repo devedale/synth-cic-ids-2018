@@ -129,42 +129,38 @@ class Ingestion:
         if csv_path.exists():
             csv_path.unlink()
 
-    def _s3_client(self):
-        import boto3
-        from botocore import UNSIGNED
-        from botocore.config import Config
+    def _download_and_extract_dataset(self) -> None:
+        """Download and extract the full dataset zip locally if it doesn't already exist.
+        
+        Analytical insight: Shifting from a day-by-day S3 download to a single bulk zip download 
+        (and local extraction) provides PySpark with immediate, zero-latency access to the raw data.
+        Since PySpark (in local mode) optimizes disk I/O by streaming chunks into memory directly from
+        disk, having all CSV files locally unzipped minimizes HTTP retrieval bottlenecks.
+        """
+        import zipfile
+        import sys
+        
+        target_dir = self.base_dir / "CSECICIDS2018_improved"
+        # Check if the folder is populated (meaning extraction was already manually completed by the user)
+        if target_dir.exists() and any(target_dir.iterdir()):
+            print("[ingestion] Dataset already extracted. Skipping download.")
+            return
 
-        return boto3.client(
-            "s3",
-            region_name=S3_REGION,
-            config=Config(signature_version=UNSIGNED),
-        )
-
-    def _download_csv(self, day: str) -> Optional[Path]:
-        csv_name = DAY_TO_CSV.get(day)
-        if csv_name is None:
-            print(f"[ingestion] No CSV mapping found for day '{day}'")
-            return None
-
-        s3_key = f"{S3_PREFIX}{csv_name}"
-        day_csvs_dir = self.csvs_dir / day
-        day_csvs_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = day_csvs_dir / csv_name
-
-        if csv_path.exists():
-            return csv_path
-
-        print(f"[ingestion] Downloading s3://{S3_BUCKET}/{s3_key}")
-        s3 = self._s3_client()
-
-        try:
-            s3.download_file(S3_BUCKET, s3_key, str(csv_path))
-        except Exception as exc:
-            print(f"[ingestion] Download failed for {day}: {exc}")
-            csv_path.unlink(missing_ok=True)
-            return None
-
-        return csv_path
+        zip_path = self.base_dir / "CSECICIDS2018_improved.zip"
+        if not zip_path.exists():
+            print("[ingestion] Downloading dataset from distrinet-research (approx 5.3GB)...")
+            from configs.settings import DATASET_URL
+            def report(count, blockSize, totalSize):
+                percent = int(count * blockSize * 100 / totalSize)
+                sys.stdout.write(f"\rDownloading... {percent}%")
+                sys.stdout.flush()
+            urllib.request.urlretrieve(DATASET_URL, zip_path, reporthook=report)
+            print("\n[ingestion] Download complete.")
+            
+        print("[ingestion] Extracting dataset...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(self.base_dir)
+        print("[ingestion] Extraction complete.")
 
     def _generate_mixed_pool(self, size: int) -> List[str]:
         pool = list(self.good_public_ips)
