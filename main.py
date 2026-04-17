@@ -16,18 +16,14 @@ from core.preprocessing import preprocess, clean_temp
 def run(args):
     ing = Ingestion(base_dir=Path(__file__).resolve().parent)
     raw = ing.run(days=args.days, force_rerun=args.force)
-    raw_df = raw["dataframe"]
-    preproc_df = preprocess(
-        raw_df,
-        sample_size=args.sample,
-        cache=args.cache,
-        cache_dir=CACHE_DIR,
-    )
+    print("\n[main] Ingestion Pipeline execution completed.")
+    print(f"[main] Status: {raw.get('status')}")
+    print(f"[main] Days processed: {raw.get('days_processed')}")
+    print(f"[main] Cache output path: {Path(CACHE_DIR)}\n")
+    print("[main] Note: In-memory Pandas preprocessing (StandardScaler) is currently skipped.")
+    print("[main] To preprocess the 40GB Parquet dataset without OOM, the preprocessing.py module should also be migrated to PySpark.\n")
+    
     clean_temp(ing.base_dir)
-    print("Pipeline execution completed.")
-    print("Total records extracted:", len(raw_df))
-    print("Preprocessed records formulated:", len(preproc_df))
-    print("Cache output path:", Path(CACHE_DIR))
 
 
 if __name__ == "__main__":
