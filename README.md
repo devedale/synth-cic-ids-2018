@@ -69,7 +69,7 @@ A corollary repository aggregating definitive lists of verified corporate and se
 
 ## 5. File Hierarchy & Structural Design
 
-The repository is modularly designed to mimic a strictly academic analysis framework, avoiding monolithic scripts and focusing on discrete computational nodes.
+The repository is modularly designed to mimic a strictly analysis framework, avoiding monolithic scripts and focusing on discrete computational nodes.
 
 ```text
 synth-cic-ids-2018/
@@ -165,9 +165,9 @@ The CIC-IDS-2018 dataset was generated inside a **controlled lab environment** w
 
 > **Note on `Src Port`:** In any realistic network deployment, source ports are ephemeral — selected pseudo-randomly by the OS TCP/IP stack and frequently remapped by NAT devices. A model that learns to associate specific source port ranges with attack labels from a controlled lab would fail entirely on real traffic that traverses NAT gateways. Including `Src Port` from the CIC lab would therefore constitute **source NAT data leakage** with no generalization value.
 
-**The correct academic approach is therefore not to restore the lab IPs, but to replace them entirely with verified, real-world addresses** — which is precisely what this pipeline implements.
+**The correct approach is therefore not to restore the lab IPs, but to replace them entirely with verified, real-world addresses** — which is precisely what this pipeline implements.
 
-### 8.3 Synthetic CTI Injection as the Academically Sound Solution
+### 8.3 Synthetic CTI Injection
 
 By discarding the lab's artificial IP topology and injecting IPs derived from live, verified threat intelligence sources, the resulting dataset achieves properties that the original simulation cannot provide:
 
