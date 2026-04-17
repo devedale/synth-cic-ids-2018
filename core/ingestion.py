@@ -55,9 +55,13 @@ class Ingestion:
             path.mkdir(parents=True, exist_ok=True)
 
     def run(self, days: Optional[List[str]], force_rerun: bool = False) -> Dict[str, Any]:
+        """Execute the ingestion pipeline."""
         selected_days = days or []
         if not selected_days:
             raise ValueError("No days provided. Pass --days or set DAYS in configs/settings.py")
+
+        # 1. Download and extract local Dataset
+        self._download_and_extract_dataset()
 
         self.malicious_ips = self._fetch_feed_ips(self.malicious_feeds, BASE_MALICIOUS_IPS, "malicious")
         self.good_public_ips = self._fetch_feed_ips(self.benign_feeds, BASE_GOOD_PUBLIC_IPS, "benign")
@@ -66,21 +70,11 @@ class Ingestion:
             if force_rerun:
                 self._clear_day_cache(day)
             if not self._is_day_cached(day):
-                self._process_day(day)
-
-        frames = []
-        for day in selected_days:
-            if self._is_day_cached(day):
-                df = self._load_day_cache(day)
-                if not df.empty:
-                    frames.append(df)
-
-        combined = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+                self._process_day_pyspark(day)
 
         return {
-            "dataframe": combined,
             "days_processed": selected_days,
-            "total_records": len(combined),
+            "status": "Spark partitions written to preprocessed_cache successfully"
         }
         
     def _fetch_feed_ips(self, feeds: List[str], base_pool: List[str], feed_type: str) -> List[str]:
@@ -121,7 +115,7 @@ class Ingestion:
 
     def _is_day_cached(self, day: str) -> bool:
         day_dir = self._day_cache_dir(day)
-        return (day_dir / "benign_records.csv").exists() and (day_dir / "attack_records.csv").exists()
+        return (day_dir / "benign_records.parquet").exists() and (day_dir / "attack_records.parquet").exists()
 
     def _clear_day_cache(self, day: str) -> None:
         shutil.rmtree(self._day_cache_dir(day), ignore_errors=True)
@@ -174,79 +168,68 @@ class Ingestion:
                 pool.append(f"192.168.{np.random.randint(0, 256)}.{np.random.randint(0, 256)}")
         return pool
 
-    def _replace_ips(self, df: pd.DataFrame, is_malicious: pd.Series) -> pd.DataFrame:
-        """
-        Replace logic (completely randomized):
-        1. Attack Src IP -> Threat Intel Feed IP
-        2. Attack Dst IP -> Random (Private OR Good Public)
-        3. Benign Src IP -> Random (Private OR Good Public)
-        4. Benign Dst IP -> Random (Private OR Good Public)
-        """
-        if "Src IP" not in df.columns:
-            df["Src IP"] = ""
-        if "Dst IP" not in df.columns:
-            df["Dst IP"] = ""
-            
-        print("[ingestion] Completely randomizing IP addresses as requested...")
+    def _process_day_pyspark(self, day: str) -> None:
+        """Read 4GB CSV using PySpark MapReduce, randomize IP addresses, and write to Parquet cache."""
+        import random
+        from pyspark.sql import SparkSession
+        import pyspark.sql.functions as F
+        from pyspark.sql.types import StringType
         
-        attack_mask = is_malicious.to_numpy()
-        benign_mask = ~attack_mask
+        print(f"[ingestion] Processing day with PySpark: {day}")
+        csv_path = self.base_dir / "CSECICIDS2018_improved" / f"{day}.csv"
         
-        n_attack = attack_mask.sum()
-        n_benign = benign_mask.sum()
-        
-        # Creiamo un pool misto di IP privati generati randomicamente e IP pubblici approvati
-        mixed_pool = self._generate_mixed_pool(min(10000, len(df)))
-        
-        # --------- Malicious Replacements ---------
-        if n_attack > 0 and self.malicious_ips:
-            df.loc[attack_mask, "Src IP"] = np.random.choice(self.malicious_ips, size=n_attack)
-            df.loc[attack_mask, "Dst IP"] = np.random.choice(mixed_pool, size=n_attack)
-            
-        # --------- Benign Replacements ---------
-        if n_benign > 0:
-            df.loc[benign_mask, "Src IP"] = np.random.choice(mixed_pool, size=n_benign)
-            df.loc[benign_mask, "Dst IP"] = np.random.choice(mixed_pool, size=n_benign)
-            
-        return df
-
-    def _process_day(self, day: str) -> None:
-        print(f"[ingestion] Processing day: {day}")
-        csv_path = self._download_csv(day)
-        if csv_path is None:
-            print(f"[ingestion] Skip day {day}: CSV unavailable")
+        if not csv_path.exists():
+            print(f"[ingestion] Skip day {day}: {csv_path.name} unavailable")
             return
 
-        print(f"[ingestion] Reading CSV: {csv_path.name}")
-        df = pd.read_csv(csv_path, low_memory=False)
+        spark = SparkSession.builder \
+            .appName("CICIDS2018_Ingestion") \
+            .config("spark.driver.memory", "8g") \
+            .getOrCreate()
+            
+        print(f"[ingestion] Loaded file in Spark: {csv_path.name}")
+        df = spark.read.csv(str(csv_path), header=True, inferSchema=False)
         
+        # IP Feeds logic
+        mixed_pool = self._generate_mixed_pool(min(10000, df.count() if df.count() > 0 else 1000))
+        malicious_pool = self.malicious_ips if self.malicious_ips else ["198.51.100.1"]
+        
+        def assign_malicious_src(): return random.choice(malicious_pool)
+        def assign_random_ip(): return random.choice(mixed_pool)
+        
+        assign_malicious_src_udf = F.udf(assign_malicious_src, StringType())
+        assign_random_ip_udf = F.udf(assign_random_ip, StringType())
+        
+        # Make sure the IP columns exist
+        if "Src IP" not in df.columns:
+            df = df.withColumn("Src IP", F.lit(""))
+        if "Dst IP" not in df.columns:
+            df = df.withColumn("Dst IP", F.lit(""))
+            
         label_col = "Label" if "Label" in df.columns else None
         if not label_col:
-            print("[ingestion] Warning: No 'Label' column found. All records treated as benign.")
-            is_malicious = pd.Series(False, index=df.index)
+            df_processed = df.withColumn("Src IP", assign_random_ip_udf())\
+                             .withColumn("Dst IP", assign_random_ip_udf())
+            benign_df = df_processed
+            attack_df = spark.createDataFrame([], df.schema)
         else:
-            is_malicious = df[label_col].str.lower() != "benign"
+            is_attack_cond = (F.lower(F.col(label_col)) != "benign")
             
-        df = self._replace_ips(df, is_malicious)
-
-        cols = df.columns.tolist()
-        if "Src IP" in cols and "Dst IP" in cols:
-            cols.remove("Src IP")
-            cols.remove("Dst IP")
-            cols = ["Src IP", "Dst IP"] + cols
-            df = df[cols]
-
-        benign_df = df[~is_malicious]
-        attack_df = df[is_malicious]
+            df_processed = df.withColumn("Src IP", F.when(is_attack_cond, assign_malicious_src_udf()).otherwise(assign_random_ip_udf()))\
+                             .withColumn("Dst IP", assign_random_ip_udf())
+                             
+            benign_df = df_processed.filter(~is_attack_cond)
+            attack_df = df_processed.filter(is_attack_cond)
         
+        # Save output partitions
         day_cache = self._day_cache_dir(day)
         day_cache.mkdir(parents=True, exist_ok=True)
         
-        benign_df.to_csv(day_cache / "benign_records.csv", index=False)
-        attack_df.to_csv(day_cache / "attack_records.csv", index=False)
+        benign_df.write.mode("overwrite").parquet(str(day_cache / "benign_records.parquet"))
+        if attack_df.count() > 0:
+            attack_df.write.mode("overwrite").parquet(str(day_cache / "attack_records.parquet"))
             
-        csv_path.unlink(missing_ok=True)
-        print(f"[ingestion] Cleaned downloaded file: {csv_path.name}\n")
+        print(f"[ingestion] Saved Spark Parquet partitions for day {day}\n")
 
     def _load_day_cache(self, day: str) -> pd.DataFrame:
         day_dir = self._day_cache_dir(day)
