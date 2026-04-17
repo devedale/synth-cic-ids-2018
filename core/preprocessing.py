@@ -47,13 +47,13 @@ def preprocess(
         cache_root = Path(cache_dir)
         cache_root.mkdir(parents=True, exist_ok=True)
 
-        if "_source_day" in out.columns:
-            for day, day_df in out.groupby("_source_day"):
-                day_dir = cache_root / str(day)
-                day_dir.mkdir(parents=True, exist_ok=True)
-                day_df.to_csv(day_dir / "preprocessed.csv", index=False)
-        else:
-            out.to_csv(cache_root / "preprocessed.csv", index=False)
+        #if "_source_day" in out.columns:
+        #    for day, day_df in out.groupby("_source_day"):
+        #        day_dir = cache_root / str(day)
+        #        day_dir.mkdir(parents=True, exist_ok=True)
+        #        day_df.to_csv(day_dir / "preprocessed.csv", index=False)
+        #else:
+        #    out.to_csv(cache_root / "preprocessed.csv", index=False)
 
     return out
 
