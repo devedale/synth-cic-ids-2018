@@ -16,8 +16,8 @@ def preprocess_spark(
     cache_dir: Optional[Union[str, Path]] = None,
 ):
     """Apply PySpark out-of-core preprocessing over 40GB parquets and optionally save."""
-    import pyspark.sql.functions as F
-    from pyspark.ml.feature import StringIndexer, StandardScaler, VectorAssembler
+    from pyspark.ml.feature import StringIndexer, StandardScaler, VectorAssembler, PCA
+    from configs.settings import NET_ENTITIES, PCA_COMPONENTS
     
     if sample_size:
         total_rows = df.count()
@@ -33,16 +33,24 @@ def preprocess_spark(
         indexer = StringIndexer(inputCol="Label", outputCol="Label_Encoded", handleInvalid="keep")
         df = indexer.fit(df).transform(df).drop("Label").withColumnRenamed("Label_Encoded", "Label")
 
+    # Enforce isolation of Network Entities so they survive for IP2Vec Embeddings
+    # Dst Port might be 'Dst Port' in CICIDS datasets, we ensure a clean exclusion list.
     num_cols = [c for c, t in df.dtypes if t in ["int", "double", "float", "bigint"] and c != "Label"]
+    num_cols = [c for c in num_cols if c not in NET_ENTITIES]
+    
     if len(num_cols) > 0:
-        assembler = VectorAssembler(inputCols=num_cols, outputCol="features", handleInvalid="skip")
+        assembler = VectorAssembler(inputCols=num_cols, outputCol="features_raw", handleInvalid="skip")
         df = assembler.transform(df)
         
-        scaler = StandardScaler(inputCol="features", outputCol="scaled_features", withStd=True, withMean=True)
+        scaler = StandardScaler(inputCol="features_raw", outputCol="features", withStd=True, withMean=True)
         scaler_model = scaler.fit(df)
-        df = scaler_model.transform(df).drop("features")
+        df = scaler_model.transform(df).drop("features_raw")
         
-        df = df.withColumnRenamed("scaled_features", "features")
+        # Parallel PCA Component extraction for Neural dimensionality tests
+        print(f"[preprocessing] Extracting {PCA_COMPONENTS} PCA structural features...")
+        pca = PCA(k=PCA_COMPONENTS, inputCol="features", outputCol="pca_features")
+        pca_model = pca.fit(df)
+        df = pca_model.transform(df)
 
     if cache:
         if cache_dir is None:
@@ -57,16 +65,3 @@ def preprocess_spark(
 
     return df
 
-def clean_temp(base_dir: Path) -> None:
-    """Cleanup temporary extraction and flow-csv folders used by ingestion."""
-    for rel in ("data/s3_csvs",):
-        target = base_dir / rel
-        if target.exists():
-            for path in sorted(target.rglob("*"), reverse=True):
-                if path.is_file():
-                    path.unlink(missing_ok=True)
-                elif path.is_dir():
-                    try:
-                        path.rmdir()
-                    except OSError:
-                        pass

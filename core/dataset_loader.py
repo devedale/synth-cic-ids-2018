@@ -12,8 +12,23 @@ def get_dataset(spark, parquet_path: str, strategy: str = "raw", target_benign_r
         strategy: "raw", "unsupervised", "binary_collapse", "undersample_majority"
         target_benign_ratio: Explicit ratio configuration for undersampling mode
     """
+    from configs.settings import USE_PCA, USE_IP2VEC, NET_ENTITIES
     
     df = spark.read.parquet(parquet_path)
+    
+    # Select Dimensional Vector Logic (PCA vs Standard)
+    if "pca_features" in df.columns:
+        if USE_PCA:
+            df = df.drop("features").withColumnRenamed("pca_features", "features")
+        else:
+            df = df.drop("pca_features")
+            
+    # Conditional Embeddings Exclusion
+    if not USE_IP2VEC:
+        # Drop categorical networking paths if legacy non-embedding architecture is active
+        found_entities = [c for c in NET_ENTITIES if c in df.columns]
+        if found_entities:
+            df = df.drop(*found_entities)
     
     if strategy == "raw":
         return df

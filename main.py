@@ -30,29 +30,9 @@ def run(args):
     full_df = spark.read.parquet(*csv_paths)
     
     # -------- Dataset Statistics Report (Cross-Tabulation) --------
+    from core.utils import generate_crosstab_report, clean_temp
     stats_file = ing.base_dir / "data" / "dataset_statistics.csv"
-    if not stats_file.exists() and full_df.count() > 0:
-        print("\n[main] Generating Cross-Tabulated Dataset Statistics Report (First run)...")
-        # Generate the crosstab using PySpark (fast distributed action)
-        crosstab_df = full_df.crosstab("Label", "_source_day")
-        
-        # Convert to Pandas for computing margins and clean printing (matrix is extremely small, ~15x10)
-        crosstab_pd = crosstab_df.toPandas()
-        if not crosstab_pd.empty:
-            crosstab_pd.set_index("Label__source_day", inplace=True)
-            crosstab_pd.index.name = "Label"
-            
-            # Calculate right margin (Row Totals)
-            crosstab_pd["Total"] = crosstab_pd.sum(axis=1)
-            
-            # Calculate bottom margin (Column Totals)
-            crosstab_pd.loc["Total"] = crosstab_pd.sum(axis=0)
-            
-            stats_file.parent.mkdir(parents=True, exist_ok=True)
-            crosstab_pd.to_csv(stats_file)
-            print("\n[main] --- Dataset Distribution Statistics ---")
-            print(crosstab_pd.to_string())
-            print(f"----------------------------------------------\n[main] Saved to {stats_file}\n")
+    generate_crosstab_report(full_df, stats_file)
     # -------------------------------------------------------------
     
     from core.dataset_loader import get_dataset

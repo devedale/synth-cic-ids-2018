@@ -41,11 +41,11 @@ graph TD
 
 | Component | Responsibility | Technical Stack |
 | :--- | :--- | :--- |
-| **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools, and injects Threat feed indicators (e.g. `198.51.100.1`). Repartitions into out-of-core raw `unified_records.parquet` outputs per day, tagging each row with `_source_day`. | PySpark SQL, UDFs |
-| **`core/dataset_loader.py`** | **SOTA Feature Store**. Loads the RAW 40GB dataset lazily and applies virtual schema strategies on-the-fly (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`). Math-based undersampling targets ensure Class Weights are perfectly controllable without dataset duplication. | PySpark ML DataFrame |
-| **`core/preprocessing.py`** | Applies `StringIndexer` for Label encoding and native `StandardScaler` to the dynamic dataframe retrieved by the Loader. | PySpark MLlib |
-| **`configs/settings.py`** | Central declarative point. Configure `ML_CLASS_STRATEGY` to control the Loader shape remotely. | Constants |
-| **`main.py`** | Entry-point script orchestrating Python context switching sequentially. Also computationally dumps a `dataset_statistics.csv` Cross-Tabulation dataset distribution metric on first run. | Orchestrator |
+| **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools, and injects Threat feed indicators. Repartitions into out-of-core raw `unified_records.parquet` outputs per day, tagging each row with `_source_day`. | PySpark SQL, UDFs |
+| **`core/dataset_loader.py`** | **SOTA Feature Store**. Loads RAW 40GB dataset lazily and applies virtual schema strategies on-the-fly (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`). Extracts conditional PCA mappings or toggles strictly isolated Routing Entities for IP2Vec embedding layers based on `settings.py`. | PySpark ML DataFrame |
+| **`core/preprocessing.py`** | Applies `StringIndexer` for Label encoding and native `StandardScaler` to continuous features. Identifies and isolates Network Entities (`NET_ENTITIES`). Generates a parallel `pca_features` matrix projection for dimensional testing. | PySpark MLlib |
+| **`configs/settings.py`** | Central declarative point. Configure ML Architectures (`USE_PCA`, `USE_IP2VEC`, `ML_CLASS_STRATEGY`). | Constants |
+| **`main.py`** | Entry-point script orchestrating Python context switching sequentially. Also outputs a `dataset_statistics.csv` dataset distribution Cross-Tabulation dataset distribution metric on first run natively through `core/utils.py`. | Orchestrator |
 
 ---
 
@@ -67,11 +67,17 @@ pip install -r requirements.txt
 ```
 
 ### 2. Execution & Configurations
-Modify `configs/settings.py` to change `ML_CLASS_STRATEGY`. Available modes for ML Pipeline testing:
+Modify `configs/settings.py` to change dataset architectures. Available modes for ML Pipeline testing:
+
+#### ML Base Strategies (`ML_CLASS_STRATEGY`)
 - `"raw"` (For natively imbalanced XGBoost processing)
 - `"unsupervised"` (Pulls only Normal traffic for Autoencoders)
 - `"binary_collapse"` (Converts 14 attacks into 1 Boolean representation)
 - `"undersample_majority"` (Dynamically downsamples Benign traffic to equal Attack frequency)
+
+#### Neural Embeddings & Analytics Toggles
+- `USE_PCA` (Exchanges massive arrays for mathematically compact `pca_features`)
+- `USE_IP2VEC` (Toggles the exposure of isolated discrete `NET_ENTITIES` arrays for Neural Embeddings layer concatenations)
 
 Run the system:
 ```bash

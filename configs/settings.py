@@ -109,3 +109,18 @@ ML_CLASS_STRATEGY = "undersample_majority"
 # Applies only when ML_CLASS_STRATEGY == "undersample_majority".
 # 0.5 means exact 50% Benign / 50% Attack distribution.
 TARGET_BENIGN_RATIO = 0.5
+
+# ---------------------------------------------------------
+# ML ARCHITECTURE EXPERIMENTS (PCA & IP2VEC)
+# ---------------------------------------------------------
+
+# Defines which network routing entities strictly bypass quantitative extraction 
+# so they can later be used natively in Neural Embedding layers (IP2Vec)
+NET_ENTITIES = ["Src IP", "Dst IP", "Src Port", "Dst Port", "Protocol"]
+
+# Dimensionality Reduction Strategy
+PCA_COMPONENTS = 20
+
+# Active Strategy Flags resolved by `dataset_loader.py` during learning
+USE_PCA = False
+USE_IP2VEC = True
