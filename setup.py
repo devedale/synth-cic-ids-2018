@@ -11,7 +11,7 @@ setup(
     packages=find_packages(include=["core", "core.*", "configs", "configs.*"]),
     include_package_data=True,
     install_requires=[
-        "boto3>=1.28.0",
+        "pyspark>=3.5.0",
         "pandas>=2.0.0",
         "numpy>=1.24.0",
         "scikit-learn>=1.3.0",

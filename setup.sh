@@ -69,7 +69,7 @@ log "Verifying Python package dependencies"
 python3 - <<'PY'
 import importlib, sys
 missing = []
-for name in ["boto3", "pandas", "sklearn", "numpy"]:
+for name in ["pyspark", "pandas", "sklearn", "numpy"]:
     try:
         importlib.import_module(name)
     except ImportError:
