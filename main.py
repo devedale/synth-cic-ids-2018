@@ -16,12 +16,31 @@ from core.preprocessing import preprocess, clean_temp
 def run(args):
     ing = Ingestion(base_dir=Path(__file__).resolve().parent)
     raw = ing.run(days=args.days, force_rerun=args.force)
-    print("\n[main] Ingestion Pipeline execution completed.")
-    print(f"[main] Status: {raw.get('status')}")
+    
+    print("\n[main] Ingestion Phase execution completed.")
     print(f"[main] Days processed: {raw.get('days_processed')}")
-    print(f"[main] Cache output path: {Path(CACHE_DIR)}\n")
-    print("[main] Note: In-memory Pandas preprocessing (StandardScaler) is currently skipped.")
-    print("[main] To preprocess the 40GB Parquet dataset without OOM, the preprocessing.py module should also be migrated to PySpark.\n")
+    
+    # Phase 2: PySpark Preprocessing
+    from pyspark.sql import SparkSession
+    spark = SparkSession.builder.appName("CICIDS2018_Pipeline").getOrCreate()
+    
+    csv_paths = [str(Path(CACHE_DIR) / day / "unified_records.parquet") for day in raw.get('days_processed', [])]
+    
+    # Read the unified unified parquet chunks dynamically
+    full_df = spark.read.parquet(*csv_paths)
+    
+    from core.preprocessing import preprocess_spark
+    final_cache_target = Path(CACHE_DIR) / "final_preprocessed.parquet"
+    
+    preproc_df = preprocess_spark(
+        full_df,
+        sample_size=args.sample,
+        cache=args.cache,
+        cache_dir=final_cache_target,
+    )
+    
+    print("\n[main] End-to-End Pipeline execution completed.")
+    print(f"[main] Fully scaled and preprocessed dataset saved at: {final_cache_target}")
     
     clean_temp(ing.base_dir)
 

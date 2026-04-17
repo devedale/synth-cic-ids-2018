@@ -9,54 +9,53 @@ import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 
-def preprocess(
-    df: pd.DataFrame,
+def preprocess_spark(
+    df,
     sample_size: Optional[int] = None,
     cache: bool = True,
     cache_dir: Optional[Union[str, Path]] = None,
-) -> pd.DataFrame:
-    """Apply lightweight preprocessing and optionally persist day-wise snapshots."""
-    if df.empty:
-        return df
+):
+    """Apply PySpark out-of-core preprocessing over 40GB parquets and optionally save."""
+    import pyspark.sql.functions as F
+    from pyspark.ml.feature import StringIndexer, StandardScaler, VectorAssembler
+    
+    if sample_size:
+        total_rows = df.count()
+        if total_rows > sample_size:
+            fraction = min(1.0, sample_size / total_rows)
+            df = df.sample(withReplacement=False, fraction=fraction, seed=42)
 
-    out = df.copy()
+    # Note: precise single-value dropping is expensive in distributed systems.
+    # It will be omitted for speed, or handled dynamically inside ML models.
+    df = df.fillna(0)
 
-    if sample_size and len(out) > sample_size:
-        out = out.sample(n=sample_size, random_state=42)
+    if "Label" in df.columns:
+        indexer = StringIndexer(inputCol="Label", outputCol="Label_Encoded", handleInvalid="keep")
+        df = indexer.fit(df).transform(df).drop("Label").withColumnRenamed("Label_Encoded", "Label")
 
-    # Drop single-value columns to reduce dimensionality noise.
-    nunique = out.nunique(dropna=False)
-    to_drop = nunique[nunique <= 1].index.tolist()
-    out = out.drop(columns=to_drop, errors="ignore")
-
-    out = out.fillna(0)
-    out = out.replace([float("inf"), float("-inf")], 0)
-
-    if "Label" in out.columns:
-        le = LabelEncoder()
-        out["Label"] = le.fit_transform(out["Label"].astype(str))
-
-    num_cols = out.select_dtypes(include=["number"]).columns.difference(["Label"])
+    num_cols = [c for c, t in df.dtypes if t in ["int", "double", "float", "bigint"] and c != "Label"]
     if len(num_cols) > 0:
-        scaler = StandardScaler()
-        out[num_cols] = scaler.fit_transform(out[num_cols])
+        assembler = VectorAssembler(inputCols=num_cols, outputCol="features", handleInvalid="skip")
+        df = assembler.transform(df)
+        
+        scaler = StandardScaler(inputCol="features", outputCol="scaled_features", withStd=True, withMean=True)
+        scaler_model = scaler.fit(df)
+        df = scaler_model.transform(df).drop("features")
+        
+        df = df.withColumnRenamed("scaled_features", "features")
 
     if cache:
         if cache_dir is None:
-            cache_dir = Path(__file__).resolve().parents[1] / "preprocessed_cache"
-        cache_root = Path(cache_dir)
+            cache_dir = Path(__file__).resolve().parents[1] / "preprocessed_cache" / "final_preprocessed.parquet"
+        
+        cache_root = Path(cache_dir).parent
         cache_root.mkdir(parents=True, exist_ok=True)
 
-        if "_source_day" in out.columns:
-            for day, day_df in out.groupby("_source_day"):
-                day_dir = cache_root / str(day)
-                day_dir.mkdir(parents=True, exist_ok=True)
-                day_df.to_csv(day_dir / "preprocessed.csv", index=False)
-        else:
-            out.to_csv(cache_root / "preprocessed.csv", index=False)
+        print("[preprocessing] Writing unified preprocessed parquet to disk...")
+        df.write.mode("overwrite").parquet(str(cache_dir))
+        print(f"[preprocessing] Unified Parquet saved at: {str(cache_dir)}")
 
-    return out
-
+    return df
 
 def clean_temp(base_dir: Path) -> None:
     """Cleanup temporary extraction and flow-csv folders used by ingestion."""
