@@ -22,26 +22,11 @@ DAYS = [
 ]
 FORCE_REDOWNLOAD = False
 
-# S3 source for CIC-IDS2018 processed CSVs
-S3_BUCKET = "cse-cic-ids2018"
-S3_REGION = "ca-central-1"
-S3_PREFIX = "Processed Traffic Data for ML Algorithms/"
-
-DAY_TO_CSV = {
-	"Wednesday-14-02-2018": "Wednesday-14-02-2018_TrafficForML_CICFlowMeter.csv",
-	"Thursday-15-02-2018": "Thursday-15-02-2018_TrafficForML_CICFlowMeter.csv",
-	"Friday-16-02-2018": "Friday-16-02-2018_TrafficForML_CICFlowMeter.csv",
-	"Tuesday-20-02-2018": "Thuesday-20-02-2018_TrafficForML_CICFlowMeter.csv",
-	"Wednesday-21-02-2018": "Wednesday-21-02-2018_TrafficForML_CICFlowMeter.csv",
-	"Thursday-22-02-2018": "Thursday-22-02-2018_TrafficForML_CICFlowMeter.csv",
-	"Friday-23-02-2018": "Friday-23-02-2018_TrafficForML_CICFlowMeter.csv",
-	"Wednesday-28-02-2018": "Wednesday-28-02-2018_TrafficForML_CICFlowMeter.csv",
-	"Thursday-01-03-2018": "Thursday-01-03-2018_TrafficForML_CICFlowMeter.csv",
-	"Friday-02-03-2018": "Friday-02-03-2018_TrafficForML_CICFlowMeter.csv",
-}
+# Dataset source
+DATASET_URL = "https://intrusion-detection.distrinet-research.be/CNS2022/Datasets/CSECICIDS2018_improved.zip"
+DATASET_DIR = PIPELINE_ROOT / "CSECICIDS2018_improved"
 
 # Paths
-CSVS_DIR = PIPELINE_ROOT / "data" / "s3_csvs"
 CACHE_DIR = PIPELINE_ROOT / "preprocessed_cache"
 # Threat Intelligence Configuration
 # =======================================================================
