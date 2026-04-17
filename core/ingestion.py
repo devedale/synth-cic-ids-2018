@@ -14,12 +14,7 @@ import pandas as pd
 import numpy as np
 
 from configs.settings import (
-    CSVS_DIR,
     CACHE_DIR,
-    DAY_TO_CSV,
-    S3_BUCKET,
-    S3_REGION,
-    S3_PREFIX,
     THREAT_INTEL_FEEDS,
     BENIGN_INTEL_FEEDS,
     BASE_MALICIOUS_IPS,
@@ -31,7 +26,6 @@ class Ingestion:
 
     def __init__(self, base_dir: Path):
         self.base_dir = base_dir
-        self.csvs_dir = CSVS_DIR
         self.cache_dir = CACHE_DIR
         
         # Threat Intelligence Feeds mapped from settings.py
@@ -51,8 +45,7 @@ class Ingestion:
         self.good_public_ips = []
         self.malicious_ips = []
 
-        for path in [self.csvs_dir, self.cache_dir]:
-            path.mkdir(parents=True, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def run(self, days: Optional[List[str]], force_rerun: bool = False) -> Dict[str, Any]:
         """Execute the ingestion pipeline."""
@@ -63,8 +56,8 @@ class Ingestion:
         # 1. Download and extract local Dataset
         self._download_and_extract_dataset()
 
-        self.malicious_ips = self._fetch_feed_ips(self.malicious_feeds, BASE_MALICIOUS_IPS, "malicious")
-        self.good_public_ips = self._fetch_feed_ips(self.benign_feeds, BASE_GOOD_PUBLIC_IPS, "benign")
+        self.malicious_ips = self._fetch_feed_ips(self.malicious_feeds, BASE_MALICIOUS_IPS, "malicious", force_redownload=force_rerun)
+        self.good_public_ips = self._fetch_feed_ips(self.benign_feeds, BASE_GOOD_PUBLIC_IPS, "benign", force_redownload=force_rerun)
 
         for day in selected_days:
             if force_rerun:
@@ -77,7 +70,15 @@ class Ingestion:
             "status": "Spark partitions written to preprocessed_cache successfully"
         }
         
-    def _fetch_feed_ips(self, feeds: List[str], base_pool: List[str], feed_type: str) -> List[str]:
+    def _fetch_feed_ips(self, feeds: List[str], base_pool: List[str], feed_type: str, force_redownload: bool = False) -> List[str]:
+        import json
+        cache_file = self.base_dir / "data" / "intel_cache" / f"{feed_type}_ips.json"
+        
+        if not force_redownload and cache_file.exists():
+            print(f"[ingestion] Loading {feed_type} IPs from local cache (reproducibility mode)...")
+            with open(cache_file, "r") as f:
+                return json.load(f)
+                
         print(f"[ingestion] Aggregating {feed_type} IPs from {len(feeds)} enabled feeds...")
         
         all_ips = set(base_pool)
@@ -100,14 +101,19 @@ class Ingestion:
             except Exception as e:
                 print(f"[ingestion] Failed to fetch feed {feed}: {e}")
                 
-        if not all_ips:
+        if len(all_ips) == len(base_pool):
             print(f"[ingestion] Fallback used because all feeds failed for {feed_type}.")
-            if feed_type == "malicious":
+            if feed_type == "malicious" and not base_pool:
                 all_ips = {"198.51.100.1"}
-            else:
+            elif not base_pool:
                 all_ips = {"8.8.8.8"}
             
-        print(f"[ingestion] Loaded {len(all_ips)} unique {feed_type} IPs.")
+        print(f"[ingestion] Fetched {len(all_ips)} unique {feed_type} IPs. Saving to local cache.")
+        
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(cache_file, "w") as f:
+            json.dump(list(all_ips), f)
+            
         return list(all_ips)
 
     def _day_cache_dir(self, day: str) -> Path:
@@ -115,7 +121,7 @@ class Ingestion:
 
     def _is_day_cached(self, day: str) -> bool:
         day_dir = self._day_cache_dir(day)
-        return (day_dir / "benign_records.parquet").exists() and (day_dir / "attack_records.parquet").exists()
+        return (day_dir / "unified_records.parquet").exists()
 
     def _clear_day_cache(self, day: str) -> None:
         shutil.rmtree(self._day_cache_dir(day), ignore_errors=True)
@@ -210,26 +216,19 @@ class Ingestion:
         if not label_col:
             df_processed = df.withColumn("Src IP", assign_random_ip_udf())\
                              .withColumn("Dst IP", assign_random_ip_udf())
-            benign_df = df_processed
-            attack_df = spark.createDataFrame([], df.schema)
         else:
             is_attack_cond = (F.lower(F.col(label_col)) != "benign")
             
             df_processed = df.withColumn("Src IP", F.when(is_attack_cond, assign_malicious_src_udf()).otherwise(assign_random_ip_udf()))\
                              .withColumn("Dst IP", assign_random_ip_udf())
-                             
-            benign_df = df_processed.filter(~is_attack_cond)
-            attack_df = df_processed.filter(is_attack_cond)
         
         # Save output partitions
         day_cache = self._day_cache_dir(day)
         day_cache.mkdir(parents=True, exist_ok=True)
         
-        benign_df.write.mode("overwrite").parquet(str(day_cache / "benign_records.parquet"))
-        if attack_df.count() > 0:
-            attack_df.write.mode("overwrite").parquet(str(day_cache / "attack_records.parquet"))
+        df_processed.repartition(10).write.mode("overwrite").parquet(str(day_cache / "unified_records.parquet"))
             
-        print(f"[ingestion] Saved Spark Parquet partitions for day {day}\n")
+        print(f"[ingestion] Saved unified Spark Parquet partition for day {day}\n")
 
     def _load_day_cache(self, day: str) -> pd.DataFrame:
         day_dir = self._day_cache_dir(day)
