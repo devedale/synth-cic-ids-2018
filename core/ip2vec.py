@@ -46,13 +46,15 @@ def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_
     """
     print(f"\n[ip2vec] Applying Prefix Isolation for vectors: {context_columns}")
     
-    # 1. Synthesize Src Region dynamically if requested
-    if "Src Region" in context_columns:
-        if "Src IP" not in df.columns:
-            print("[ip2vec] WARNING: Cannot generate 'Src Region' without 'Src IP'. Reverting to UNKNOWN.")
-            df = df.withColumn("Src Region", F.lit("UNKNOWN"))
-        else:
-            df = df.withColumn("Src Region", iana_region_udf(F.col("Src IP")))
+    # Synthesize Region tokens dynamically from IP columns using IANA offline lookup
+    region_tokens = {"Src Region": "Src IP", "Dst Region": "Dst IP"}
+    for region_col, ip_col in region_tokens.items():
+        if region_col in context_columns:
+            if ip_col not in df.columns:
+                print(f"[ip2vec] WARNING: Cannot generate '{region_col}' without '{ip_col}'. Reverting to UNKNOWN.")
+                df = df.withColumn(region_col, F.lit("UNKNOWN"))
+            else:
+                df = df.withColumn(region_col, iana_region_udf(F.col(ip_col)))
             
     # 2. Strict Prefixing to avoid integer overlaps (e.g., Port 80 != Protocol 80)
     # We dynamically append the column name as a string prefix.
