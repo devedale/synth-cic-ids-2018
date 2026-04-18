@@ -10,7 +10,6 @@ from configs.settings import (
     CACHE_DIR,
 )
 from core.ingestion import Ingestion
-from core.preprocessing import preprocess, clean_temp
 
 
 def run(args):
@@ -22,7 +21,19 @@ def run(args):
     
     # Phase 2: PySpark Preprocessing
     from pyspark.sql import SparkSession
-    spark = SparkSession.builder.appName("CICIDS2018_Pipeline").getOrCreate()
+    spark_tmp = Path(__file__).resolve().parent / "spark_tmp"
+    spark_tmp.mkdir(exist_ok=True)
+    spark = (
+        SparkSession.builder
+        .appName("CICIDS2018_Pipeline")
+        .config("spark.driver.memory", "12g")
+        .config("spark.executor.memory", "12g")
+        .config("spark.memory.fraction", "0.8")
+        .config("spark.memory.storageFraction", "0.3")
+        .config("spark.local.dir", str(spark_tmp))
+        .config("spark.sql.shuffle.partitions", "200")
+        .getOrCreate()
+    )
     
     csv_paths = [str(Path(CACHE_DIR) / day / "unified_records.parquet") for day in raw.get('days_processed', [])]
     
@@ -44,7 +55,7 @@ def run(args):
     final_cache_target = Path(CACHE_DIR) / f"final_preprocessed_{ML_CLASS_STRATEGY}.parquet"
     
     # Lazily evaluate the specialized ML DataFrame request
-    ml_df = get_dataset(spark, str(Path(CACHE_DIR)), strategy=ML_CLASS_STRATEGY, target_benign_ratio=TARGET_BENIGN_RATIO)
+    ml_df = get_dataset(spark, *csv_paths, strategy=ML_CLASS_STRATEGY, target_benign_ratio=TARGET_BENIGN_RATIO)
     
     preproc_df = preprocess_spark(
         ml_df,

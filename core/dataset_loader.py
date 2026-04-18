@@ -1,20 +1,23 @@
 import pyspark.sql.functions as F
 from pyspark.sql import DataFrame
 
-def get_dataset(spark, parquet_path: str, strategy: str = "raw", target_benign_ratio: float = 0.5) -> DataFrame:
+from configs.settings import TARGET_BENIGN_RATIO, RANDOM_SEED
+
+
+def get_dataset(spark, *parquet_paths: str, strategy: str = "raw", target_benign_ratio: float = TARGET_BENIGN_RATIO) -> DataFrame:
     """
     SOTA Data Loader: Lazily loads unified Parquet logs and applies the selected Matrix shape strategy 
     without duplicating data on disk.
     
     Args:
         spark: Active SparkSession
-        parquet_path: Path to the unified _or_ final preprocessed Parquet directory
+        *parquet_paths: One or more paths to unified Parquet directories (one per processed day)
         strategy: "raw", "unsupervised", "binary_collapse", "undersample_majority"
         target_benign_ratio: Explicit ratio configuration for undersampling mode
     """
     from configs.settings import USE_PCA, USE_IP2VEC, NET_ENTITIES
     
-    df = spark.read.parquet(parquet_path)
+    df = spark.read.parquet(*parquet_paths)
     
     # Select Dimensional Vector Logic (PCA vs Standard)
     if "pca_features" in df.columns:
@@ -76,7 +79,7 @@ def get_dataset(spark, parquet_path: str, strategy: str = "raw", target_benign_r
             fractions["Attack"] = min(1.0, desired_a_count / a_count)
             fractions["Benign"] = 1.0
             
-        return df_binary.sampleBy("Label", fractions, seed=42)
+        return df_binary.sampleBy("Label", fractions, seed=RANDOM_SEED)
         
     else:
         raise ValueError(f"Unknown Strategy: {strategy}. Choose from 'raw', 'unsupervised', 'binary_collapse', 'undersample_majority'.")

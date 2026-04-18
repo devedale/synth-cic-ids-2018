@@ -74,10 +74,12 @@ def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_
     print("[ip2vec] Training Native PySpark Word2Vec (Skip-gram) distributed model...")
     word2vec = Word2Vec(
         vectorSize=vector_size, 
-        minCount=0, 
+        minCount=1,
+        maxSentenceLength=2,
         inputCol="ip2vec_sequence", 
-        outputCol="ip2vec_embeddings", 
-        windowSize=5
+        outputCol="ip2vec_embeddings",
+        windowSize=2,
+        numPartitions=4,
     )
     
     model = word2vec.fit(df)

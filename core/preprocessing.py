@@ -18,13 +18,13 @@ def preprocess_spark(
     """Apply PySpark out-of-core preprocessing over 40GB parquets and optionally save."""
     from core.ip2vec import compute_ip2vec_embeddings
     from pyspark.ml.feature import StringIndexer, StandardScaler, VectorAssembler, PCA
-    from configs.settings import NET_ENTITIES, PCA_COMPONENTS, IP2VEC_SENTENCE
+    from configs.settings import NET_ENTITIES, PCA_COMPONENTS, IP2VEC_SENTENCE, RANDOM_SEED
     
     if sample_size:
         total_rows = df.count()
         if total_rows > sample_size:
             fraction = min(1.0, sample_size / total_rows)
-            df = df.sample(withReplacement=False, fraction=fraction, seed=42)
+            df = df.sample(withReplacement=False, fraction=fraction, seed=RANDOM_SEED)
 
     # Note: precise single-value dropping is expensive in distributed systems.
     # It will be omitted for speed, or handled dynamically inside ML models.
@@ -65,7 +65,9 @@ def preprocess_spark(
         cache_root.mkdir(parents=True, exist_ok=True)
 
         print("[preprocessing] Writing unified preprocessed parquet to disk...")
+        df = df.persist()
         df.write.mode("overwrite").parquet(str(cache_dir))
+        df.unpersist()
         print(f"[preprocessing] Unified Parquet saved at: {str(cache_dir)}")
 
     return df

@@ -18,7 +18,8 @@ from configs.settings import (
     THREAT_INTEL_FEEDS,
     BENIGN_INTEL_FEEDS,
     BASE_MALICIOUS_IPS,
-    BASE_GOOD_PUBLIC_IPS
+    BASE_GOOD_PUBLIC_IPS,
+    RANDOM_SEED,
 )
 
 class Ingestion:
@@ -45,6 +46,11 @@ class Ingestion:
         self.good_public_ips = []
         self.malicious_ips = []
 
+        # Pin global randomness to the single pipeline seed
+        import random as _random
+        _random.seed(RANDOM_SEED)
+        np.random.seed(RANDOM_SEED)
+
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def run(self, days: Optional[List[str]], force_rerun: bool = False) -> Dict[str, Any]:
@@ -59,6 +65,14 @@ class Ingestion:
         self.malicious_ips = self._fetch_feed_ips(self.malicious_feeds, BASE_MALICIOUS_IPS, "malicious", force_redownload=force_rerun)
         self.good_public_ips = self._fetch_feed_ips(self.benign_feeds, BASE_GOOD_PUBLIC_IPS, "benign", force_redownload=force_rerun)
 
+        # Balance: if malicious pool is larger, oversample benign by random repetition
+        import random as _random
+        n_mal, n_ben = len(self.malicious_ips), len(self.good_public_ips)
+        if n_mal > n_ben:
+            extra = _random.choices(self.good_public_ips, k=n_mal - n_ben)
+            self.good_public_ips = self.good_public_ips + extra
+            print(f"[ingestion] Benign pool padded: {n_ben} → {len(self.good_public_ips)} IPs (matches malicious pool size)")
+
         for day in selected_days:
             if force_rerun:
                 self._clear_day_cache(day)
@@ -72,6 +86,8 @@ class Ingestion:
         
     def _fetch_feed_ips(self, feeds: List[str], base_pool: List[str], feed_type: str, force_redownload: bool = False) -> List[str]:
         import json
+        import random
+        import re
         cache_file = self.base_dir / "data" / "intel_cache" / f"{feed_type}_ips.json"
         
         if not force_redownload and cache_file.exists():
@@ -81,9 +97,11 @@ class Ingestion:
                 
         print(f"[ingestion] Aggregating {feed_type} IPs from {len(feeds)} enabled feeds...")
         
-        all_ips = set(base_pool)
-        import re
-        ipv4_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b')
+        all_ips: set[str] = set(base_pool)
+        # Matches both plain IPs (1.2.3.4) and CIDR blocks (1.2.3.4/24)
+        cidr_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:/[0-9]{1,2})?\b')
+        # Maximum hosts to expand per individual CIDR block (avoids memory blow-up for huge /8 ranges)
+        MAX_HOSTS_PER_BLOCK = 256
         
         for feed in feeds:
             try:
@@ -93,15 +111,26 @@ class Ingestion:
                     lines = response.read().decode('utf-8').splitlines()
                 
                 for line in lines:
-                    if not line.strip() or line.strip().startswith('#'):
+                    line = line.strip()
+                    if not line or line.startswith('#'):
                         continue
-                    found_ips = ipv4_pattern.findall(line)
-                    all_ips.update(found_ips)
+                    for token in cidr_pattern.findall(line):
+                        try:
+                            network = ipaddress.ip_network(token, strict=False)
+                            hosts = list(network.hosts()) or [network.network_address]
+                            if len(hosts) <= MAX_HOSTS_PER_BLOCK:
+                                all_ips.update(str(h) for h in hosts)
+                            else:
+                                # Large block: sample a random subset to stay manageable
+                                sampled = random.sample(hosts, MAX_HOSTS_PER_BLOCK)
+                                all_ips.update(str(h) for h in sampled)
+                        except ValueError:
+                            pass  # not a valid IP/CIDR token, skip
                     
             except Exception as e:
                 print(f"[ingestion] Failed to fetch feed {feed}: {e}")
                 
-        if len(all_ips) == len(base_pool):
+        if len(all_ips) == len(set(base_pool)):
             print(f"[ingestion] Fallback used because all feeds failed for {feed_type}.")
             if feed_type == "malicious" and not base_pool:
                 all_ips = {"198.51.100.1"}
@@ -190,7 +219,8 @@ class Ingestion:
 
         spark = SparkSession.builder \
             .appName("CICIDS2018_Ingestion") \
-            .config("spark.driver.memory", "8g") \
+            .config("spark.driver.memory", "12g") \
+            .config("spark.executor.memory", "12g") \
             .getOrCreate()
             
         print(f"[ingestion] Loaded file in Spark: {csv_path.name}")
@@ -229,7 +259,7 @@ class Ingestion:
         # Tag origin day for ML statistics loader tracking before saving RAW block
         df_processed = df_processed.withColumn("_source_day", F.lit(day))
         
-        df_processed.repartition(10).write.mode("overwrite").parquet(str(day_cache / "unified_records.parquet"))
+        df_processed.repartition(150).write.mode("overwrite").parquet(str(day_cache / "unified_records.parquet"))
             
         print(f"[ingestion] Saved unified Spark Parquet partition for day {day}\n")
 

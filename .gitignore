@@ -103,8 +103,9 @@ models/*.pkl
 tmp/
 temp/
 
-# Other
+# Spark
+spark_tmp/
 
-AGENTS.md
-GUIDA_RAPIDA.md
-SPEC-DRIVEN.mdpipeline.log
+# Other
+CSECICIDS2018_improved/
+CLAUDE.md
