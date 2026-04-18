@@ -1,8 +1,12 @@
-# Minimal Python dependencies for DDOS dataset generator pipeline
+# Core pipeline dependencies
 pandas>=2.0.0
 numpy>=1.24.0
 scikit-learn>=1.3.0
 pyspark>=3.5.0
 
-# Optional but useful for tests
+# Visualization (academic style)
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# Tests
 pytest>=7.4.0

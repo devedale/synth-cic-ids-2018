@@ -124,3 +124,14 @@ PCA_COMPONENTS = 20
 # Active Strategy Flags resolved by `dataset_loader.py` during learning
 USE_PCA = False
 USE_IP2VEC = True
+
+# ---------------------------------------------------------
+# IP2VEC EMBEDDINGS SEQUENCE SCHEMA
+# ---------------------------------------------------------
+# Define the categorical context window architecture for Skip-gram word2vec embeddings.
+# Available contextual tokens: ["Src IP", "Dst IP", "Src Port", "Dst Port", "Protocol", "Src Region"]
+# 
+# Example A (Full Routing Path): IP2VEC_SENTENCE = ["Src IP", "Dst IP", "Dst Port", "Protocol"]
+# Example B (Anonymized Port/Proto): IP2VEC_SENTENCE = ["Dst Port", "Protocol"]
+
+IP2VEC_SENTENCE = ["Dst Port", "Protocol"]

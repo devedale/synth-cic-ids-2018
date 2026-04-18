@@ -26,12 +26,25 @@ graph TD
     subgraph PySpark Ingestion Engine
     B --> D{Spark MapReduce}
     C --> D
-    D -->|Src/Dst IP Injection| E[Unified Parquet Database]
+    D -->|Src/Dst IP Injection| E[Unified Parquet - Raw]
     end
     
     subgraph PySpark ML Preprocessing
-    E -->|VectorAssembler| F[StringIndexer]
-    F -->|StandardScaler| G[fully_scaled_preprocessed.parquet]
+    E -->|VectorAssembler excl. NET_ENTITIES| F[StandardScaler]
+    F -->|Parallel PCA| G[features + pca_features]
+    G -->|Skip-gram Word2Vec| H[ip2vec_embeddings]
+    H --> I[final_preprocessed.parquet]
+    end
+    
+    subgraph Feature Store Loader
+    I -->|Strategy Switch| J{dataset_loader.py}
+    J -->|USE_PCA / USE_IP2VEC| K[ML Model Input]
+    end
+    
+    subgraph Reporting
+    I -->|First Run| L[dataset_statistics.csv]
+    L --> M[core/visuals.py]
+    M --> N[Academic PDF Charts]
     end
 ```
 
@@ -41,11 +54,13 @@ graph TD
 
 | Component | Responsibility | Technical Stack |
 | :--- | :--- | :--- |
-| **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools, and injects Threat feed indicators. Repartitions into out-of-core raw `unified_records.parquet` outputs per day, tagging each row with `_source_day`. | PySpark SQL, UDFs |
-| **`core/dataset_loader.py`** | **SOTA Feature Store**. Loads RAW 40GB dataset lazily and applies virtual schema strategies on-the-fly (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`). Extracts conditional PCA mappings or toggles strictly isolated Routing Entities for IP2Vec embedding layers based on `settings.py`. | PySpark ML DataFrame |
-| **`core/preprocessing.py`** | Applies `StringIndexer` for Label encoding and native `StandardScaler` to continuous features. Identifies and isolates Network Entities (`NET_ENTITIES`). Generates a parallel `pca_features` matrix projection for dimensional testing. | PySpark MLlib |
-| **`configs/settings.py`** | Central declarative point. Configure ML Architectures (`USE_PCA`, `USE_IP2VEC`, `ML_CLASS_STRATEGY`). | Constants |
-| **`main.py`** | Entry-point script orchestrating Python context switching sequentially. Also outputs a `dataset_statistics.csv` dataset distribution Cross-Tabulation dataset distribution metric on first run natively through `core/utils.py`. | Orchestrator |
+| **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools, injects Threat feed indicators. Repartitions into out-of-core `unified_records.parquet`, tagging each row with `_source_day`. | PySpark SQL, UDFs |
+| **`core/dataset_loader.py`** | **SOTA Feature Store**. Loads RAW 40GB dataset lazily, applies virtual schema strategies (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`), and evaluates `USE_PCA`/`USE_IP2VEC` flags to deliver the correct feature matrix to the model. | PySpark ML DataFrame |
+| **`core/preprocessing.py`** | Label encoding (`StringIndexer`), continuous feature scaling (`StandardScaler`), parallel PCA projection (`pca_features`). Calls `ip2vec.py` for distributed Skip-gram embedding generation. Enforces `NET_ENTITIES` isolation list. | PySpark MLlib |
+| **`core/ip2vec.py`** | Transforms discrete network routing tokens into continuous latent vectors via native PySpark `Word2Vec` (Skip-gram). Applies **Token Prefixing** (`Protocol_6` vs `DstPort_6`) to guarantee orthogonal embedding subspaces. Performs offline IANA-based `Src Region` geolocation. | PySpark ML, IANA RIR |
+| **`core/visuals.py`** | Dedicated visualization engine. All output is academic-standard (serif fonts, minimal grid, 300 DPI PDF). Exposes `plot_dataset_statistics()`, `plot_pca_variance()`, `plot_training_curves()`. | matplotlib, seaborn |
+| **`core/utils.py`** | General I/O utilities: cross-tabulation report generation, temp directory cleanup. | Python stdlib |
+| **`configs/settings.py`** | Central declarative point for all experiment flags: `ML_CLASS_STRATEGY`, `USE_PCA`, `USE_IP2VEC`, `IP2VEC_SENTENCE`. | Constants |
 
 ---
 
@@ -76,8 +91,11 @@ Modify `configs/settings.py` to change dataset architectures. Available modes fo
 - `"undersample_majority"` (Dynamically downsamples Benign traffic to equal Attack frequency)
 
 #### Neural Embeddings & Analytics Toggles
-- `USE_PCA` (Exchanges massive arrays for mathematically compact `pca_features`)
-- `USE_IP2VEC` (Toggles the exposure of isolated discrete `NET_ENTITIES` arrays for Neural Embeddings layer concatenations)
+- `USE_PCA` (Exchanges massive raw feature arrays for PCA-compressed `pca_features`)
+- `USE_IP2VEC` (Provides the `ip2vec_embeddings` vector column; `NET_ENTITIES` remain excluded from StandardScaler in either case)
+- `IP2VEC_SENTENCE` (Context window token list for Skip-gram. Tokens are prefixed before training — `Protocol_6` and `DstPort_6` live in completely separate embedding subspaces, regardless of their numeric value)
+  - Available tokens: `"Src IP"`, `"Dst IP"`, `"Src Port"`, `"Dst Port"`, `"Protocol"`, `"Src Region"`
+  - `Src Region` is computed inline via offline IANA First-Octet → RIR mapping (no external API)
 
 Run the system:
 ```bash
