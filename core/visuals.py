@@ -98,3 +98,48 @@ def plot_training_curves(history_dict: dict, output_dir: Path) -> None:
     fig.savefig(str(out_file), bbox_inches='tight')
     plt.close(fig)
     print(f"[visuals] Training curves saved to {out_file}")
+
+def plot_confusion_matrix(y_true, y_pred, labels: list, title: str, 
+                          output_path: Path, cmap: str = "Blues") -> None:
+    """
+    Plot a standardized academic-style confusion matrix heatmap.
+    
+    Parameters
+    ----------
+    y_true : array-like
+        Ground truth (correct) target values.
+    y_pred : array-like
+        Estimated targets as returned by a classifier.
+    labels : list of str
+        Display names for classes.
+    title : str
+        Plot title.
+    output_path : Path
+        Full path to save the generated image.
+    cmap : str
+        Color map (e.g., 'Blues' for supervised, 'Reds' for anomaly).
+    """
+    from sklearn.metrics import confusion_matrix
+    
+    cm = confusion_matrix(y_true, y_pred)
+    
+    # Use a dynamic figsize based on label count
+    size = max(6, len(labels) * 0.8)
+    fig, ax = plt.subplots(figsize=(size, size * 0.8))
+    
+    sns.heatmap(cm, annot=True, fmt="d", cmap=cmap,
+                xticklabels=labels, yticklabels=labels, 
+                ax=ax, linewidths=0.5, cbar=False,
+                annot_kws={"size": 10, "weight": "bold"})
+    
+    ax.set_title(title, pad=20, fontsize=14, weight='bold')
+    ax.set_xlabel("Predicted Label", weight='bold', labelpad=10)
+    ax.set_ylabel("True Label", weight='bold', labelpad=10)
+    
+    plt.xticks(rotation=45, ha='right')
+    plt.yticks(rotation=0)
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(output_path), bbox_inches='tight')
+    plt.close(fig)
+    print(f"[visuals] Confusion Matrix saved to {output_path}")

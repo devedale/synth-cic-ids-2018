@@ -2,7 +2,13 @@
 # -*- coding: utf-8 -*-
 """Entry-point for the minimal autonomous ingestion + preprocessing pipeline."""
 import argparse
+import os
+import sys
 from pathlib import Path
+
+os.environ["PYSPARK_PYTHON"] = sys.executable
+os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
+
 from configs.settings import (
     DAYS,
     SAMPLE_SIZE,

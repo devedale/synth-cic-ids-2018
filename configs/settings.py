@@ -17,10 +17,8 @@ RANDOM_SEED = 42
 # Ingestion and day selection
 DAYS = [
         "Wednesday-14-02-2018",     # FTP-BruteForce, SSH-BruteForce
-        "Thursday-15-02-2018",    # DoS-GoldenEye, DoS-Slowloris
-        "Friday-16-02-2018",      # DoS-SlowHTTPTest, DoS-Hulk
         "Tuesday-20-02-2018",       # DDoS-LOIC-HTTP, DDoS-LOIC-UDP
-        "Wednesday-21-02-2018",   # DDoS-LOIC-UDP, DDoS-HOIC
+        "Wednesday-21-02-2018",     # DDoS-LOIC-UDP, DDoS-HOIC
         "Thursday-22-02-2018",    # Web-BruteForce, Web-XSS, Web-SQLi
         "Friday-23-02-2018",      # Web attacks (continua)
         "Wednesday-28-02-2018",   # Infiltration
@@ -129,7 +127,7 @@ NET_ENTITIES = ["Src IP", "Dst IP", "Src Port", "Dst Port", "Protocol"]
 # Dimensionality Reduction Strategy
 # we extract only the top 10 structural components
 # which usually explain >95% of the variance. Forcing 20 components would map noise.
-PCA_COMPONENTS = 10
+PCA_COMPONENTS = 25
 
 # Advanced PCA-Based Feature Selection
 PCA_FEATURE_SELECTION = True
@@ -150,4 +148,4 @@ USE_IP2VEC = True
 # Example A (Full Routing Path): IP2VEC_SENTENCE = ["Src IP", "Dst IP", "Dst Port", "Protocol"]
 # Example B (Anonymized Port/Proto): IP2VEC_SENTENCE = ["Dst Port", "Protocol"]
 
-IP2VEC_SENTENCE = ["Dst Port", "Protocol"]
+IP2VEC_SENTENCE = ["Dst Port", "Protocol", "Src Region"]

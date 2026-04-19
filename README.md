@@ -1,7 +1,5 @@
-<div align="center">
   <h1>CIC-IDS-2018 DDoS Enhanced Dataset Generator</h1>
   <p><h3>An autonomous, out-of-core pipeline for generating threat-intelligence-augmented synthetic PCAP datasets.</h3></p>
-</div>
 
 ---
 
@@ -55,12 +53,13 @@ graph TD
 | Component | Responsibility | Technical Stack |
 | :--- | :--- | :--- |
 | **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools, injects Threat feed indicators. Repartitions into out-of-core `unified_records.parquet`, tagging each row with `_source_day`. | PySpark SQL, UDFs |
-| **`core/dataset_loader.py`** | **SOTA Feature Store**. Loads RAW 40GB dataset lazily, applies virtual schema strategies (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`), and evaluates `USE_PCA`/`USE_IP2VEC` flags to deliver the correct feature matrix to the model. | PySpark ML DataFrame |
+| **`core/dataset_loader.py`** | **Feature Store**. Loads RAW 40GB dataset lazily, applies virtual schema strategies (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`), and evaluates `USE_PCA`/`USE_IP2VEC` flags to deliver the correct feature matrix to the model. | PySpark ML DataFrame |
 | **`core/preprocessing.py`** | Label encoding (`StringIndexer`), continuous feature scaling (`StandardScaler`), parallel PCA projection (`pca_features`). Calls `ip2vec.py` for distributed Skip-gram embedding generation. Enforces `NET_ENTITIES` isolation list. | PySpark MLlib |
 | **`core/ip2vec.py`** | Transforms discrete network routing tokens into continuous latent vectors via native PySpark `Word2Vec` (Skip-gram). Applies **Token Prefixing** (`Protocol_6` vs `DstPort_6`). Performs advanced offline IP geolocation (Country/Type) leveraging **MaxMind GeoLite2** databases, accelerated by **Apache Arrow** via vectorized Pandas UDFs (`@pandas_udf`). | PySpark ML, GeoIP2, Apache Arrow |
 | **`core/visuals.py`** | Dedicated visualization engine. All output is academic-standard (serif fonts, minimal grid, 300 DPI PDF). Exposes `plot_dataset_statistics()`, `plot_pca_variance()`, `plot_training_curves()`. | matplotlib, seaborn |
 | **`core/utils.py`** | General I/O utilities: cross-tabulation report generation, temp directory cleanup. | Python stdlib |
 | **`configs/settings.py`** | Central declarative point for all experiment flags: `ML_CLASS_STRATEGY`, `USE_PCA`, `USE_IP2VEC`, `IP2VEC_SENTENCE`. | Constants |
+| **`scratch_hpo.py`** | **Neural HPO Benchmark Suite**. High-performance search over MLP, ResNet, 1D-CNN, and Autoencoder architectures using Optuna and MLflow. | Optuna, PyTorch, MLflow |
 
 ---
 
@@ -111,6 +110,24 @@ Optional CLI overrides:
 > [!TIP]
 > **Dataset Distribution Matrix**
 > On first pipeline execution, a PySpark Cross-Tabulation runs seamlessly generating `data/dataset_statistics.csv` printing the intersection of all ML Labels vs the specific extraction Day they appeared on, with horizontal/vertical Marginal counters.
+
+### 3. Neural Architecture HPO (Optuna + MLflow)
+A dedicated benchmarking suite is included to optimize hyper-parameters across multiple neural architectures.
+
+```bash
+# Run HPO with a 50% sample and 30 search trials
+python scratch_hpo.py --trials 30 --sample 0.5
+```
+
+#### 🔍 Analytical Insights: Why IP2Vec?
+Traditional network ML relies on **One-Hot Encoding** for Categorical entities (Ports, IPs). This suffers from:
+1. **Dimensionality Curse**: Millions of unique IPs lead to sparse, unmanageable matrices.
+2. **Loss of Semantics**: One-Hot treats all values as equidistant.
+
+**IP2Vec (Distributed Representation)**:
+- Learns embeddings via **Skip-gram Word2Vec** based on flow co-occurrence.
+- **Duality**: Captures semantic similarity (e.g., ports 80/443 mapping closer than 80/22) in a low-dimensional manifold.
+- **Dual-Head Optimization**: The `AutoencoderClassifier` architecture simultaneously minimizes reconstruction error (unsupervised anomaly detection) and cross-entropy (supervised classification), creating a more generalized latent space for zero-day detection.
 
 ---
 

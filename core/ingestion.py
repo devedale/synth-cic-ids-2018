@@ -154,9 +154,6 @@ class Ingestion:
 
     def _clear_day_cache(self, day: str) -> None:
         shutil.rmtree(self._day_cache_dir(day), ignore_errors=True)
-        csv_path = self.csvs_dir / day / DAY_TO_CSV.get(day, "")
-        if csv_path.exists():
-            csv_path.unlink()
 
     def _download_and_extract_dataset(self) -> None:
         """Download and extract the full dataset zip locally if it doesn't already exist.
@@ -247,7 +244,7 @@ class Ingestion:
             df_processed = df.withColumn("Src IP", assign_random_ip_udf())\
                              .withColumn("Dst IP", assign_random_ip_udf())
         else:
-            is_attack_cond = (F.lower(F.col(label_col)) != "benign")
+            is_attack_cond = (F.trim(F.lower(F.col(label_col))) != "benign")
             
             df_processed = df.withColumn("Src IP", F.when(is_attack_cond, assign_malicious_src_udf()).otherwise(assign_random_ip_udf()))\
                              .withColumn("Dst IP", assign_random_ip_udf())

@@ -46,37 +46,39 @@ def get_dataset(df: DataFrame, strategy: str = "raw", target_benign_ratio: float
         
     elif strategy == "undersample_majority":
         # Stratified Native Downsampling mechanism using PySpark
+        # Multi-class detection: We keep the original labels but compute the sampling fractions 
+        # based on 'benign' vs 'all_attacks'.
+        
+        # 1. Identify which rows are benign vs attacks (case-insensitive + trim)
         df_binary = df.withColumn(
-            "Label", 
-            F.when(F.col("Label") != "Benign", "Attack").otherwise("Benign")
+            "is_benign", 
+            F.when(F.trim(F.lower(F.col("Label"))) == "benign", True).otherwise(False)
         )
         
-        # In reality, PySpark sampleBy works perfectly with fractions dict based on string categories!
-        # First we need frequencies (costs an action, but unavoidable for exact ratio mapping)
-        fractions = {}
-        total_counts = df_binary.groupBy("Label").count().collect()
-        count_dict = {row['Label']: row['count'] for row in total_counts}
+        # 2. Get counts
+        counts = df_binary.groupBy("is_benign").count().collect()
+        count_dict = {row['is_benign']: row['count'] for row in counts}
         
-        b_count = count_dict.get('Benign', 0)
-        a_count = count_dict.get('Attack', 0)
+        b_count = count_dict.get(True, 0)
+        a_count = count_dict.get(False, 0) # Total count of all attacks combined
         
         if b_count == 0 or a_count == 0:
-            return df_binary # Cannot balance if one class is entirely missing
+            return df # Cannot balance if one side is missing
             
         current_ratio = b_count / (b_count + a_count)
         
+        # 3. Compute sampling fraction for Benign rows
         if current_ratio > target_benign_ratio:
-            # Benign is majority
             desired_b_count = a_count * (target_benign_ratio / (1.0 - target_benign_ratio))
-            fractions["Benign"] = min(1.0, desired_b_count / b_count)
-            fractions["Attack"] = 1.0
+            b_sample_frac = min(1.0, desired_b_count / b_count)
         else:
-            # Attack is majority
-            desired_a_count = b_count * ((1.0 - target_benign_ratio) / target_benign_ratio)
-            fractions["Attack"] = min(1.0, desired_a_count / a_count)
-            fractions["Benign"] = 1.0
+            b_sample_frac = 1.0 # Already weighted towards attacks or balanced
             
-        return df_binary.sampleBy("Label", fractions, seed=RANDOM_SEED)
+        # 4. Filter and sample. Note: we use a filter + union or a sampleBy on a temp column.
+        # sampleBy is efficient:
+        sampled_df = df_binary.sampleBy("is_benign", {True: b_sample_frac, False: 1.0}, seed=RANDOM_SEED)
+        
+        return sampled_df.drop("is_benign")
         
     else:
         raise ValueError(f"Unknown Strategy: {strategy}. Choose from 'raw', 'unsupervised', 'binary_collapse', 'undersample_majority'.")
