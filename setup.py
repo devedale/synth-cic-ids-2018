@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Setup script for ddos_enhanched_dataset minimal package."""
+"""Setup script for synth-cic-ids-2018 minimal package."""
 
 from setuptools import setup, find_packages
 

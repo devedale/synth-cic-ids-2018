@@ -18,7 +18,7 @@ def preprocess_spark(
     """Apply PySpark out-of-core preprocessing over 40GB parquets and optionally save."""
     from core.ip2vec import compute_ip2vec_embeddings
     from pyspark.ml.feature import StringIndexer, StandardScaler, VectorAssembler, PCA
-    from configs.settings import NET_ENTITIES, PCA_COMPONENTS, IP2VEC_SENTENCE, RANDOM_SEED
+    from configs.settings import NET_ENTITIES, PCA_COMPONENTS, IP2VEC_SENTENCE, RANDOM_SEED, USE_IP2VEC, USE_PCA
     
     if sample_size:
         total_rows = df.count()
@@ -47,15 +47,17 @@ def preprocess_spark(
         scaler_model = scaler.fit(df)
         df = scaler_model.transform(df).drop("features_raw")
         
-        # Parallel PCA Component extraction for Neural dimensionality tests
-        print(f"[preprocessing] Extracting {PCA_COMPONENTS} PCA structural features...")
-        pca = PCA(k=PCA_COMPONENTS, inputCol="features", outputCol="pca_features")
-        pca_model = pca.fit(df)
-        df = pca_model.transform(df)
+        if USE_PCA:
+            # Parallel PCA Component extraction for Neural dimensionality tests
+            print(f"[preprocessing] Extracting {PCA_COMPONENTS} PCA structural features...")
+            pca = PCA(k=PCA_COMPONENTS, inputCol="features", outputCol="pca_features")
+            pca_model = pca.fit(df)
+            df = pca_model.transform(df)
         
-    # Execute Distributed Skip-gram Embeddings Generation
-    # NET_ENTITIES are safely decoupled, we now compute the IP2Vec arrays natively.
-    df = compute_ip2vec_embeddings(df, context_columns=IP2VEC_SENTENCE)
+    if USE_IP2VEC:
+        # Execute Distributed Skip-gram Embeddings Generation
+        # NET_ENTITIES are safely decoupled, we now compute the IP2Vec arrays natively.
+        df = compute_ip2vec_embeddings(df, context_columns=IP2VEC_SENTENCE)
 
     if cache:
         if cache_dir is None:

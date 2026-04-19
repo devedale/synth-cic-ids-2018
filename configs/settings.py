@@ -20,12 +20,12 @@ DAYS = [
         "Thursday-15-02-2018",    # DoS-GoldenEye, DoS-Slowloris
         "Friday-16-02-2018",      # DoS-SlowHTTPTest, DoS-Hulk
         "Tuesday-20-02-2018",       # DDoS-LOIC-HTTP, DDoS-LOIC-UDP
-        #"Wednesday-21-02-2018",   # DDoS-LOIC-UDP, DDoS-HOIC
-        #"Thursday-22-02-2018",    # Web-BruteForce, Web-XSS, Web-SQLi
-        #"Friday-23-02-2018",      # Web attacks (continua)
-        #"Wednesday-28-02-2018",   # Infiltration
-        #"Thursday-01-03-2018",    # Infiltration (continua)
-        #"Friday-02-03-2018",      # Bot
+        "Wednesday-21-02-2018",   # DDoS-LOIC-UDP, DDoS-HOIC
+        "Thursday-22-02-2018",    # Web-BruteForce, Web-XSS, Web-SQLi
+        "Friday-23-02-2018",      # Web attacks (continua)
+        "Wednesday-28-02-2018",   # Infiltration
+        "Thursday-01-03-2018",    # Infiltration (continua)
+        "Friday-02-03-2018",      # Bot
 ]
 FORCE_REDOWNLOAD = False
 
