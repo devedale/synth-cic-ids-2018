@@ -16,7 +16,7 @@ RANDOM_SEED = 42
 
 # Ingestion and day selection
 DAYS = [
-        #"Wednesday-14-02-2018",     # FTP-BruteForce, SSH-BruteForce
+        "Wednesday-14-02-2018",     # FTP-BruteForce, SSH-BruteForce
         "Thursday-15-02-2018",    # DoS-GoldenEye, DoS-Slowloris
         "Friday-16-02-2018",      # DoS-SlowHTTPTest, DoS-Hulk
         "Tuesday-20-02-2018",       # DDoS-LOIC-HTTP, DDoS-LOIC-UDP
@@ -35,6 +35,7 @@ DATASET_DIR = PIPELINE_ROOT / "CSECICIDS2018_improved"
 
 # Paths
 CACHE_DIR = PIPELINE_ROOT / "preprocessed_cache"
+MODELS_DIR = PIPELINE_ROOT / "models_cache"
 # Threat Intelligence Configuration
 # =======================================================================
 # FEED TEST SUMMARY (Apr 2026):
@@ -126,10 +127,18 @@ TARGET_BENIGN_RATIO = 0.5
 NET_ENTITIES = ["Src IP", "Dst IP", "Src Port", "Dst Port", "Protocol"]
 
 # Dimensionality Reduction Strategy
-PCA_COMPONENTS = 20
+# we extract only the top 10 structural components
+# which usually explain >95% of the variance. Forcing 20 components would map noise.
+PCA_COMPONENTS = 10
+
+# Advanced PCA-Based Feature Selection
+PCA_FEATURE_SELECTION = True
+# Out of ~75 original features, we physically keep the best 25.
+# Computed mathematically via Global Variance-Weighted Importance Scoring
+PCA_TARGET_FEATURES = 25
 
 # Active Strategy Flags resolved by `dataset_loader.py` during learning
-USE_PCA = False
+USE_PCA = True
 USE_IP2VEC = True
 
 # ---------------------------------------------------------

@@ -11,27 +11,58 @@ from pyspark.sql.types import StringType
 from pyspark.ml.feature import Word2Vec
 from pyspark.sql import DataFrame
 
-# Offline IANA First-Octet to Regional Internet Registry (RIR) map.
-# Extremely fast compared to MaxMind GeoIP lookups.
-def _get_iana_region(ip_str: str) -> str:
-    if not ip_str or not isinstance(ip_str, str):
-        return "UNKNOWN"
-    try:
-        first_octet = int(ip_str.split(".")[0])
-    except:
-        return "UNKNOWN"
-        
-    # Simplified IANA Assignments Map
-    if 0 <= first_octet <= 126:
-        return "ARIN" # Mostly North America
-    elif 128 <= first_octet <= 191:
-        return "RIPE" # Mostly Europe/Middle East
-    elif 192 <= first_octet <= 223:
-        return "APNIC/LACNIC" # Asia-Pacific / Latin America
-    else:
-        return "MULTICAST_EXPERIMENTAL"
+from pathlib import Path
+import pandas as pd
 
-iana_region_udf = F.udf(_get_iana_region, StringType())
+# Advanced Offline GeoIP Lookup leveraging MaxMind GeoLite2
+@F.pandas_udf(StringType())
+def geoip_region_udf(ips: pd.Series) -> pd.Series:
+    import geoip2.database
+    import ipaddress
+    
+    # Path to the downloaded MaxMind DB
+    db_path = Path(__file__).resolve().parents[1] / "data" / "intel_cache" / "GeoLite2-Country.mmdb"
+    
+    # We open the reader once per batch inside the Pandas UDF for massive performance gains
+    reader = None
+    if db_path.exists():
+        try:
+            reader = geoip2.database.Reader(str(db_path))
+        except Exception:
+            pass
+            
+    def resolve_ip(ip_str):
+        if not ip_str or not isinstance(ip_str, str):
+            return "UNKNOWN"
+            
+        try:
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_private:
+                return "PRIVATE_LAN"
+            if ip.is_loopback:
+                return "LOOPBACK"
+            if ip.is_multicast:
+                return "MULTICAST"
+            if ip.is_reserved:
+                return "RESERVED"
+        except:
+            return "UNKNOWN"
+            
+        if reader:
+            try:
+                response = reader.country(ip_str)
+                return response.country.iso_code or "UNKNOWN"
+            except Exception: # AddressNotFoundError
+                return "UNKNOWN"
+        else:
+            return "UNKNOWN_NO_DB"
+            
+    res = ips.apply(resolve_ip)
+    
+    if reader:
+        reader.close()
+        
+    return res
 
 
 def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_size: int = 16) -> DataFrame:
@@ -46,7 +77,7 @@ def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_
     """
     print(f"\n[ip2vec] Applying Prefix Isolation for vectors: {context_columns}")
     
-    # Synthesize Region tokens dynamically from IP columns using IANA offline lookup
+    # Synthesize Region tokens dynamically from IP columns using GeoIP offline lookup
     region_tokens = {"Src Region": "Src IP", "Dst Region": "Dst IP"}
     for region_col, ip_col in region_tokens.items():
         if region_col in context_columns:
@@ -54,7 +85,7 @@ def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_
                 print(f"[ip2vec] WARNING: Cannot generate '{region_col}' without '{ip_col}'. Reverting to UNKNOWN.")
                 df = df.withColumn(region_col, F.lit("UNKNOWN"))
             else:
-                df = df.withColumn(region_col, iana_region_udf(F.col(ip_col)))
+                df = df.withColumn(region_col, geoip_region_udf(F.col(ip_col)))
             
     # 2. Strict Prefixing to avoid integer overlaps (e.g., Port 80 != Protocol 80)
     # We dynamically append the column name as a string prefix.
@@ -83,6 +114,11 @@ def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_
     )
     
     model = word2vec.fit(df)
+    
+    from configs.settings import MODELS_DIR
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    model.write().overwrite().save(str(MODELS_DIR / "ip2vec_model"))
+    
     df = model.transform(df)
     
     # 5. Cleanup temporary sequence and prefixed tokens

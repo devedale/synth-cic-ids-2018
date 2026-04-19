@@ -35,17 +35,16 @@ def plot_dataset_statistics(csv_path: Path, output_dir: Path) -> None:
     
     # Drop margins for the core visualization if they exist
     plot_df = df.copy()
-    if 'Total' in plot_df.columns:
-        plot_df.drop(columns=['Total'], inplace=True)
+    
     if 'Total' in plot_df.index:
         plot_df.drop(index=['Total'], inplace=True)
         
-    fig, ax = plt.subplots(figsize=(10, 6))
-    
-    # Using a professional monochrome/blue color map
-    sns.heatmap(plot_df, annot=True, fmt=".0f", cmap="Blues", 
-                linewidths=0.5, linecolor='gray', ax=ax,
-                cbar_kws={'label': 'Traffic Count'})
+    if 'Total' in plot_df.columns:
+        plot_df = plot_df.sort_values(by='Total', ascending=False)
+        # We KEEP the Total column visible as per user request
+        
+    # Massive figsize to allow the text to breathe
+    fig, ax = plt.subplots(figsize=(24, 14))
                 
     ax.set_title("Network Traffic Class Distribution Over Time", pad=20, fontsize=14, weight='bold')
     ax.set_ylabel("Threat Class", weight='bold')

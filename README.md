@@ -57,7 +57,7 @@ graph TD
 | **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools, injects Threat feed indicators. Repartitions into out-of-core `unified_records.parquet`, tagging each row with `_source_day`. | PySpark SQL, UDFs |
 | **`core/dataset_loader.py`** | **SOTA Feature Store**. Loads RAW 40GB dataset lazily, applies virtual schema strategies (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`), and evaluates `USE_PCA`/`USE_IP2VEC` flags to deliver the correct feature matrix to the model. | PySpark ML DataFrame |
 | **`core/preprocessing.py`** | Label encoding (`StringIndexer`), continuous feature scaling (`StandardScaler`), parallel PCA projection (`pca_features`). Calls `ip2vec.py` for distributed Skip-gram embedding generation. Enforces `NET_ENTITIES` isolation list. | PySpark MLlib |
-| **`core/ip2vec.py`** | Transforms discrete network routing tokens into continuous latent vectors via native PySpark `Word2Vec` (Skip-gram). Applies **Token Prefixing** (`Protocol_6` vs `DstPort_6`) to guarantee orthogonal embedding subspaces. Performs offline IANA-based `Src Region` geolocation. | PySpark ML, IANA RIR |
+| **`core/ip2vec.py`** | Transforms discrete network routing tokens into continuous latent vectors via native PySpark `Word2Vec` (Skip-gram). Applies **Token Prefixing** (`Protocol_6` vs `DstPort_6`). Performs advanced offline IP geolocation (Country/Type) leveraging **MaxMind GeoLite2** databases, accelerated by **Apache Arrow** via vectorized Pandas UDFs (`@pandas_udf`). | PySpark ML, GeoIP2, Apache Arrow |
 | **`core/visuals.py`** | Dedicated visualization engine. All output is academic-standard (serif fonts, minimal grid, 300 DPI PDF). Exposes `plot_dataset_statistics()`, `plot_pca_variance()`, `plot_training_curves()`. | matplotlib, seaborn |
 | **`core/utils.py`** | General I/O utilities: cross-tabulation report generation, temp directory cleanup. | Python stdlib |
 | **`configs/settings.py`** | Central declarative point for all experiment flags: `ML_CLASS_STRATEGY`, `USE_PCA`, `USE_IP2VEC`, `IP2VEC_SENTENCE`. | Constants |
@@ -94,8 +94,8 @@ Modify `configs/settings.py` to change dataset architectures. Available modes fo
 - `USE_PCA` (Exchanges massive raw feature arrays for PCA-compressed `pca_features`)
 - `USE_IP2VEC` (Provides the `ip2vec_embeddings` vector column; `NET_ENTITIES` remain excluded from StandardScaler in either case)
 - `IP2VEC_SENTENCE` (Context window token list for Skip-gram. Tokens are prefixed before training — `Protocol_6` and `DstPort_6` live in completely separate embedding subspaces, regardless of their numeric value)
-  - Available tokens: `"Src IP"`, `"Dst IP"`, `"Src Port"`, `"Dst Port"`, `"Protocol"`, `"Src Region"`
-  - `Src Region` is computed inline via offline IANA First-Octet → RIR mapping (no external API)
+  - Available tokens: `"Src IP"`, `"Dst IP"`, `"Src Port"`, `"Dst Port"`, `"Protocol"`, `"Src Region"`, `"Dst Region"`
+  - `Src Region` & `Dst Region` are computed inline via offline **MaxMind GeoLite2** lookup. Execution is vectorized through **Apache Arrow** (`pyarrow`) for extreme performance over tens of millions of rows.
 
 Run the system:
 ```bash

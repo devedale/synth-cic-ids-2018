@@ -4,20 +4,17 @@ from pyspark.sql import DataFrame
 from configs.settings import TARGET_BENIGN_RATIO, RANDOM_SEED
 
 
-def get_dataset(spark, *parquet_paths: str, strategy: str = "raw", target_benign_ratio: float = TARGET_BENIGN_RATIO) -> DataFrame:
+def get_dataset(df: DataFrame, strategy: str = "raw", target_benign_ratio: float = TARGET_BENIGN_RATIO) -> DataFrame:
     """
-    SOTA Data Loader: Lazily loads unified Parquet logs and applies the selected Matrix shape strategy 
+    SOTA Data Loader: Lazily applies the selected Matrix shape strategy 
     without duplicating data on disk.
     
     Args:
-        spark: Active SparkSession
-        *parquet_paths: One or more paths to unified Parquet directories (one per processed day)
+        df: Base DataFrame natively loaded from parquets
         strategy: "raw", "unsupervised", "binary_collapse", "undersample_majority"
         target_benign_ratio: Explicit ratio configuration for undersampling mode
     """
     from configs.settings import USE_PCA, USE_IP2VEC, NET_ENTITIES
-    
-    df = spark.read.parquet(*parquet_paths)
     
     # Select Dimensional Vector Logic (PCA vs Standard)
     if "pca_features" in df.columns:

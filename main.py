@@ -42,8 +42,11 @@ def run(args):
     
     # -------- Dataset Statistics Report (Cross-Tabulation) --------
     from core.utils import generate_crosstab_report, clean_temp
+    from core.visuals import plot_dataset_statistics
     stats_file = ing.base_dir / "data" / "dataset_statistics.csv"
+    visuals_dir = ing.base_dir / "data" / "visuals"
     generate_crosstab_report(full_df, stats_file)
+    plot_dataset_statistics(stats_file, visuals_dir)
     # -------------------------------------------------------------
     
     from core.dataset_loader import get_dataset
@@ -55,7 +58,7 @@ def run(args):
     final_cache_target = Path(CACHE_DIR) / f"final_preprocessed_{ML_CLASS_STRATEGY}.parquet"
     
     # Lazily evaluate the specialized ML DataFrame request
-    ml_df = get_dataset(spark, *csv_paths, strategy=ML_CLASS_STRATEGY, target_benign_ratio=TARGET_BENIGN_RATIO)
+    ml_df = get_dataset(full_df, strategy=ML_CLASS_STRATEGY, target_benign_ratio=TARGET_BENIGN_RATIO)
     
     preproc_df = preprocess_spark(
         ml_df,

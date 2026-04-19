@@ -6,17 +6,15 @@ from pathlib import Path
 
 def clean_temp(base_dir: Path) -> None:
     """Cleanup temporary extraction and flow-csv folders used by ingestion."""
-    for rel in ("data/s3_csvs",):
+    import shutil
+    for rel in ("spark_tmp",):
         target = base_dir / rel
         if target.exists():
-            for path in sorted(target.rglob("*"), reverse=True):
+            for path in target.iterdir():
                 if path.is_file():
                     path.unlink(missing_ok=True)
                 elif path.is_dir():
-                    try:
-                        path.rmdir()
-                    except OSError:
-                        pass
+                    shutil.rmtree(path, ignore_errors=True)
 
 def generate_crosstab_report(full_df, stats_file: Path) -> None:
     """Generate a Cross-Tabulated Dataset Statistics Report explicitly utilizing PySpark actions."""
