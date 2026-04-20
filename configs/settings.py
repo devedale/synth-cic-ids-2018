@@ -149,3 +149,19 @@ USE_IP2VEC = True
 # Example B (Anonymized Port/Proto): IP2VEC_SENTENCE = ["Dst Port", "Protocol"]
 
 IP2VEC_SENTENCE = ["Dst Port", "Protocol", "Src Region"]
+
+# ---------------------------------------------------------
+# EXPERIMENT FRAMEWORK — HPO PARAMS PATH
+# ---------------------------------------------------------
+# Template for per-config HPO results. Use config.name to resolve.
+HPO_PARAMS_TEMPLATE = "best_params_{config_name}.json"
+
+# ---------------------------------------------------------
+# FEDERATED LEARNING SETTINGS (Flower)
+# ---------------------------------------------------------
+FL_NUM_CLIENTS     = 5      # Simulated clients
+FL_NUM_ROUNDS      = 10     # Global aggregation rounds
+FL_LOCAL_EPOCHS    = 3      # Local epochs per client per round
+FL_FRACTION_FIT    = 1.0    # Fraction of clients selected per round
+FL_MIN_FIT_CLIENTS = 3      # Minimum clients for training
+FL_MIN_AVAILABLE   = 3      # Minimum clients that must be available

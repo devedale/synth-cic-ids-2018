@@ -143,3 +143,57 @@ def plot_confusion_matrix(y_true, y_pred, labels: list, title: str,
     fig.savefig(str(output_path), bbox_inches='tight')
     plt.close(fig)
     print(f"[visuals] Confusion Matrix saved to {output_path}")
+
+def plot_metrics_radar(results_df: pd.DataFrame, output_dir: Path) -> None:
+    """
+    Radar chart overlay comparing multiple configuration metrics.
+    Assumes results_df has columns: accuracy, f1, auc_roc, fpr, fnr.
+    And a column 'config_name' or index representing the series name.
+    """
+    # Inverse error metrics so larger area = better overall performance
+    categories = ['accuracy', 'f1', 'auc_roc', 'fpr_inv (1-fpr)', 'fnr_inv (1-fnr)']
+    
+    req_cols = ['accuracy', 'f1', 'auc_roc', 'fpr', 'fnr']
+    if not all(c in results_df.columns for c in req_cols):
+        print("[visuals] Radar chart missing required columns.")
+        return
+        
+    N = len(categories)
+    angles = [n / float(N) * 2 * np.pi for n in range(N)]
+    angles += angles[:1]
+    
+    fig, ax = plt.subplots(figsize=(8, 8), subplot_kw=dict(polar=True))
+    
+    ax.set_xticks(angles[:-1])
+    ax.set_xticklabels(categories, size=11, weight='bold')
+    
+    ax.set_rlabel_position(0)
+    plt.yticks([0.2, 0.4, 0.6, 0.8], ["0.2", "0.4", "0.6", "0.8"], color="grey", size=10)
+    plt.ylim(0, 1.05)
+    
+    # Use standard seaborn palette
+    colors = sns.color_palette("husl", len(results_df))
+    
+    for (idx, row), color in zip(results_df.iterrows(), colors):
+        name = row['config_name'] if 'config_name' in results_df.columns else str(idx)
+        
+        values = [
+            row['accuracy'], 
+            row['f1'], 
+            row['auc_roc'], 
+            1.0 - row['fpr'], 
+            1.0 - row['fnr']
+        ]
+        values += values[:1]
+        
+        ax.plot(angles, values, linewidth=2, linestyle='solid', label=name, color=color)
+        ax.fill(angles, values, color=color, alpha=0.1)
+        
+    plt.legend(loc='upper right', bbox_to_anchor=(1.35, 1.1))
+    ax.set_title("Configuration Radar Chart (Larger Area = Better)", pad=30, weight='bold', fontsize=14)
+    
+    out_file = output_dir / "metrics_radar.pdf"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(str(out_file), bbox_inches='tight')
+    plt.close(fig)
+    print(f"[visuals] Radar chart saved to {out_file}")

@@ -132,9 +132,13 @@ def preprocess_spark(
             selected_feature_cols = [num_cols[i] for i in sorted(top_indices)]
 
             # Persist the manifest so training/benchmark scripts are self-sufficient
+            import json
+            json_manifest_path = MODELS_DIR / "pca_selected_features.json"
+            json_manifest_path.write_text(json.dumps(selected_feature_cols, indent=2))
+            
             manifest_path = MODELS_DIR / "pca_selected_features.txt"
             manifest_path.write_text("\n".join(selected_feature_cols))
-            print(f"[pca] Selected {len(selected_feature_cols)} features → {manifest_path}")
+            print(f"[pca] Selected {len(selected_feature_cols)} features → {json_manifest_path}")
 
         # Now apply the scaler to the INDIVIDUAL selected columns so each
         # column in the Parquet is the StandardScaled value (mean=0, std=1).
@@ -145,14 +149,13 @@ def preprocess_spark(
         scale_exprs = []
         col_index = {c: i for i, c in enumerate(num_cols)}
         for c in df.columns:
-            if c in selected_feature_cols:
+            if c in num_cols:
                 i = col_index[c]
                 std = float(scaler_std[i]) if scaler_std[i] != 0 else 1.0
                 mean = float(scaler_mean[i])
                 scale_exprs.append(((F.col(c) - mean) / std).alias(c))
-            elif c not in num_cols:          # non-numeric: keep as-is
+            else:          # non-numeric: keep as-is
                 scale_exprs.append(F.col(c))
-            # else: numeric but NOT selected → implicitly dropped by not including it
 
         df = df.select(*scale_exprs)
 
@@ -170,13 +173,13 @@ def preprocess_spark(
 
     # ── Final column pruning ───────────────────────────────────────────────────
     # The Parquet is the training matrix.  Keep ONLY:
-    #   • 25 named numeric feature columns  (self-documenting, named doubles)
+    #   • ALL numeric feature columns       (self-documenting, named doubles)
     #   • ip2vec_embeddings                 (16-dim latent vector)
     #   • IP2VEC_SENTENCE categoricals      (raw tokens for baseline One-Hot)
     #   • Label                             (binary target)
     #
     # Everything else (IPs, timestamps, internal metadata) is dropped.
-    keep = set(selected_feature_cols) | {"ip2vec_embeddings", "Label"} | set(IP2VEC_SENTENCE)
+    keep = set(num_cols) | {"ip2vec_embeddings", "Label"} | set(IP2VEC_SENTENCE)
     final_cols = [c for c in df.columns if c in keep]
     dropped = len(df.columns) - len(final_cols)
     if dropped > 0:

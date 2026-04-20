@@ -8,6 +8,14 @@ pyspark>=3.5.0
 matplotlib>=3.8.0
 seaborn>=0.13.0
 
+# Neural Networks & HPO
+torch>=2.0.0
+optuna>=3.5.0
+mlflow>=2.10.0
+
+# Federated Learning
+flwr[simulation]>=1.8.0
+
 # Tests
 pytest>=7.4.0
 geoip2>=4.8.0

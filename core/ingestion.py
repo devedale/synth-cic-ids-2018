@@ -100,8 +100,8 @@ class Ingestion:
         all_ips: set[str] = set(base_pool)
         # Matches both plain IPs (1.2.3.4) and CIDR blocks (1.2.3.4/24)
         cidr_pattern = re.compile(r'\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?:/[0-9]{1,2})?\b')
-        # Maximum hosts to expand per individual CIDR block (avoids memory blow-up for huge /8 ranges)
-        MAX_HOSTS_PER_BLOCK = 256
+        # Maximum hosts to expand per individual CIDR block
+        MAX_HOSTS_PER_BLOCK = 25000
         
         for feed in feeds:
             try:
@@ -117,14 +117,21 @@ class Ingestion:
                     for token in cidr_pattern.findall(line):
                         try:
                             network = ipaddress.ip_network(token, strict=False)
-                            hosts = list(network.hosts()) or [network.network_address]
-                            if len(hosts) <= MAX_HOSTS_PER_BLOCK:
-                                all_ips.update(str(h) for h in hosts)
+                            num_hosts = network.num_addresses
+                            # Ignore 0 or broadcast addresses
+                            min_idx = 1 if network.version == 4 else 0
+                            max_idx = num_hosts - 2 if network.version == 4 else num_hosts - 1
+                            max_idx = max(min_idx, max_idx)
+                            
+                            valid_hosts_count = max_idx - min_idx + 1
+                            
+                            if valid_hosts_count <= MAX_HOSTS_PER_BLOCK:
+                                all_ips.update(str(h) for h in network.hosts())
                             else:
-                                # Large block: sample a random subset to stay manageable
-                                sampled = random.sample(hosts, MAX_HOSTS_PER_BLOCK)
-                                all_ips.update(str(h) for h in sampled)
-                        except ValueError:
+                                # Efficient large block sampling without MemoryError
+                                indices = random.sample(range(min_idx, max_idx + 1), MAX_HOSTS_PER_BLOCK)
+                                all_ips.update(str(network[i]) for i in indices)
+                        except (ValueError, OverflowError):
                             pass  # not a valid IP/CIDR token, skip
                     
             except Exception as e:

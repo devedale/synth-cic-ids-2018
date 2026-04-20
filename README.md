@@ -235,6 +235,111 @@ This design creates a more generalized latent space useful for zero-day detectio
 
 ---
 
+## 🧪 Experimental Design & Evaluation Framework
+
+### Research Objective
+
+The core of this research is a **factorial comparison** that isolates and quantifies the effect of three independent variables on model performance:
+
+1. **Feature Representation** (Network Context): IP2Vec embeddings vs explicit categorical encoding
+2. **Dimensionality Reduction** (Numerical Features): PCA feature selection vs full feature set
+3. **Training Paradigm**: Centralized (A) vs Federated Learning (B)
+
+> [!IMPORTANT]
+> The **best hyperparameters found by Optuna HPO** are fixed and reused identically across all 8 experiment configurations. This guarantees that any observed performance delta is attributable to the feature/training variable, not to architectural differences.
+
+### Input Configurations
+
+Let:
+- `X_num_full` — Full numerical feature set (~75 columns, excluding `NET_ENTITIES`)
+- `X_num_pca` — PCA-transformed features (top 25 by variance-weighted importance)
+- `X_cat` — Categorical features = `[Dst Port, Protocol, Src Region]`
+- `X_ip2vec` — Dense 16-dim embedding from IP2Vec Skip-gram
+
+#### Config 1: IP2Vec + PCA
+```
+Input = [X_num_pca, X_ip2vec]
+```
+PCA-compressed numerics concatenated with learned network entity embeddings.
+
+#### Config 2: IP2Vec + No-PCA
+```
+Input = [X_num_full, X_ip2vec]
+```
+Full numeric feature space with IP2Vec embeddings — maximum information, highest dimensionality.
+
+#### Config 3: No-IP2Vec + PCA
+```
+Input = [X_num_pca, X_cat_encoded]
+```
+PCA numerics with explicitly encoded categoricals (One-Hot / StringIndexer).
+
+#### Config 4: No-IP2Vec + No-PCA
+```
+Input = [X_num_full, X_cat_encoded]
+```
+Full feature space with explicit categorical encoding — the traditional ML baseline.
+
+> [!NOTE]
+> In **IP2Vec** configurations, categorical network features are replaced by dense learned embeddings.
+> In **No-IP2Vec** configurations, they are explicitly encoded (One-Hot) and concatenated to the numeric input.
+
+### Model Architecture
+
+All configurations share an identical backbone to ensure fair comparison:
+
+- **Multi-input architecture** with two branches:
+  - **Numerical branch**: PCA-transformed or full scaled features
+  - **Network branch**: IP2Vec embeddings or One-Hot categoricals
+- **Fusion**: Concatenation of both branches
+- **Shared backbone**: Fully connected layers (architecture and hyperparameters frozen from HPO best trial)
+
+### Experimental Matrix
+
+Each of the 4 feature configurations is evaluated under both training paradigms:
+
+| Feature Config | Centralized (A) | Federated (B) |
+| :--- | :---: | :---: |
+| **IP2Vec + PCA** | ✓ | ✓ |
+| **IP2Vec + No-PCA** | ✓ | ✓ |
+| **No-IP2Vec + PCA** | ✓ | ✓ |
+| **No-IP2Vec + No-PCA** | ✓ | ✓ |
+
+**Total experiments: 8 configurations**
+
+### Evaluation Metrics
+
+For **each configuration**, the following are computed and reported:
+
+| Metric | Formula |
+| :--- | :--- |
+| **Accuracy** | `(TP + TN) / (TP + TN + FP + FN)` |
+| **Precision** | `TP / (TP + FP)` |
+| **Recall** | `TP / (TP + FN)` |
+| **F1-Score** | `2 × (Precision × Recall) / (Precision + Recall)` |
+| **FPR** (False Positive Rate) | `FP / (FP + TN)` |
+| **FNR** (False Negative Rate) | `FN / (FN + TP)` |
+| **Execution Time** | Wall-clock training + inference time |
+
+Additionally, a **Confusion Matrix** is generated for each of the 8 runs.
+
+### Results Reporting Format
+
+All results are aggregated in a single comparative table:
+
+| Config | Training | Accuracy | Precision | Recall | F1 | FPR | FNR | Time |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| IP2Vec + PCA | A | — | — | — | — | — | — | — |
+| IP2Vec + PCA | B | — | — | — | — | — | — | — |
+| IP2Vec + No-PCA | A | — | — | — | — | — | — | — |
+| IP2Vec + No-PCA | B | — | — | — | — | — | — | — |
+| No-IP2Vec + PCA | A | — | — | — | — | — | — | — |
+| No-IP2Vec + PCA | B | — | — | — | — | — | — | — |
+| No-IP2Vec + No-PCA | A | — | — | — | — | — | — | — |
+| No-IP2Vec + No-PCA | B | — | — | — | — | — | — | — |
+
+---
+
 > [!NOTE]
 > **Data Integrity and Caching Pattern**
 > 
