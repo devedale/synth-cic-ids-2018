@@ -19,7 +19,7 @@ from pathlib import Path
 
 from configs.settings import (
     RANDOM_SEED, HPO_N_TRIALS, HPO_SAMPLE_FRAC, HPO_EPOCHS,
-    BATCH_SIZE, SPARK_DRIVER_MEMORY,
+    BATCH_SIZE, SPARK_DRIVER_MEMORY, set_global_seed
 )
 from experiments.configs import EXPERIMENT_CONFIGS, ExperimentConfig
 from experiments.data_loader import load_tensors, create_loader
@@ -168,6 +168,8 @@ if __name__ == "__main__":
     parser.add_argument("--epochs",  type=int,   default=HPO_EPOCHS,      help="Training epochs per trial")
     parser.add_argument("--config",  type=str,   default="ALL",           help="Config name, or ALL")
     args = parser.parse_args()
+    
+    set_global_seed(RANDOM_SEED)
 
     for cfg in EXPERIMENT_CONFIGS:
         if args.config == "ALL" or cfg.name == args.config:

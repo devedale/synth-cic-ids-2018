@@ -14,6 +14,18 @@ PROJECT_ROOT = PIPELINE_ROOT.parent
 # =======================================================================
 RANDOM_SEED = 42
 
+def set_global_seed(seed: int):
+    import random
+    import numpy as np
+    import torch
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 # Ingestion and day selection
 DAYS = [
         "Wednesday-14-02-2018",     # FTP-BruteForce, SSH-BruteForce
@@ -97,7 +109,7 @@ BASE_GOOD_PUBLIC_IPS = [
 # Output settings
 CACHE_ENABLED = True
 SAMPLING_ENABLED = False
-SAMPLE_SIZE = 500000
+SAMPLE_SIZE = 5000 #500000
 
 # ---------------------------------------------------------
 # IP SUBSTITUTION (NAT-like anonymisation)

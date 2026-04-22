@@ -25,6 +25,7 @@ from flwr.common import Context
 from configs.settings import (
     FL_FRACTION_FIT, FL_LOCAL_EPOCHS, FL_MIN_AVAILABLE,
     FL_MIN_FIT_CLIENTS, FL_NUM_CLIENTS, FL_NUM_ROUNDS, RANDOM_SEED,
+    set_global_seed
 )
 from core.visuals import plot_confusion_matrix, plot_training_curves
 from experiments.configs import EXPERIMENT_CONFIGS, ExperimentConfig
@@ -156,9 +157,17 @@ def run_federated_for_config(cfg: ExperimentConfig, sample_frac: float) -> dict:
 
         def client_fn(context: Context) -> fl.client.Client:
             cid = int(context.node_id) % FL_NUM_CLIENTS
+            # ── Seed every Ray actor deterministically ────────────────────
+            # Each actor gets a unique-but-reproducible seed derived from
+            # RANDOM_SEED, the current fold, and the client id so that:
+            #   1. Different clients explore different weight initializations
+            #   2. The same client always starts from the same weights across runs
+            actor_seed = RANDOM_SEED + fold * FL_NUM_CLIENTS + cid
+            set_global_seed(actor_seed)
+            # ─────────────────────────────────────────────────────────────
             start = cid * client_size
             end   = min((cid + 1) * client_size, dataset_size)
-            cl_loader = create_loader(X_train_f[start:end], y_train_f[start:end], shuffle=True)
+            cl_loader = create_loader(X_train_f[start:end], y_train_f[start:end], shuffle=True, seed=actor_seed)
             cl_val    = create_loader(X_val, y_val, shuffle=False)
             cl_model  = build_model(input_dim, n_classes, cfg)
             return IDSClient(cl_model, cl_loader, cl_val, cfg).to_client()
@@ -249,6 +258,7 @@ if __name__ == "__main__":
 
     results = []
     Path("results").mkdir(exist_ok=True)
+    set_global_seed(RANDOM_SEED)
 
     for cfg in EXPERIMENT_CONFIGS:
         cfg.paradigm = "federated"

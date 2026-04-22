@@ -145,6 +145,31 @@ def load_tensors(cfg: ExperimentConfig, sample_frac: float = 1.0, seed: int = RA
     )
 
 
-def create_loader(X: torch.Tensor, y: torch.Tensor, batch_size: int = 512, shuffle: bool = True) -> DataLoader:
+def create_loader(
+    X: torch.Tensor,
+    y: torch.Tensor,
+    batch_size: int = 512,
+    shuffle: bool = True,
+    seed: int = RANDOM_SEED,
+) -> DataLoader:
+    """Create a DataLoader with fully deterministic shuffle when seed is provided."""
     ds = TensorDataset(X, y)
-    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
+
+    if shuffle:
+        # Fixed Generator → same shuffle order every run
+        g = torch.Generator()
+        g.manual_seed(seed)
+
+        def worker_init_fn(worker_id: int):
+            # Seed every DataLoader worker subprocess independently but reproducibly
+            import random
+            import numpy as np
+            w_seed = seed + worker_id
+            random.seed(w_seed)
+            np.random.seed(w_seed)
+            torch.manual_seed(w_seed)
+
+        return DataLoader(ds, batch_size=batch_size, shuffle=True,
+                          generator=g, worker_init_fn=worker_init_fn)
+    else:
+        return DataLoader(ds, batch_size=batch_size, shuffle=False)

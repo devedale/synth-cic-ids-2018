@@ -17,7 +17,7 @@ import pandas as pd
 import torch
 from sklearn.model_selection import StratifiedKFold
 
-from configs.settings import RANDOM_SEED
+from configs.settings import RANDOM_SEED, set_global_seed
 from core.visuals import plot_confusion_matrix, plot_training_curves
 from experiments.configs import EXPERIMENT_CONFIGS, ExperimentConfig
 from experiments.data_loader import create_loader, load_full_tensors
@@ -62,7 +62,7 @@ def run_centralized_for_config(cfg: ExperimentConfig, sample_frac: float, epochs
         input_dim = X.shape[1]
         model = build_model(input_dim, n_classes, cfg).to(DEVICE)
 
-        train_loader = create_loader(X_train_f, y_train_f, shuffle=True)
+        train_loader = create_loader(X_train_f, y_train_f, shuffle=True, seed=RANDOM_SEED + fold)
         val_loader   = create_loader(X_val, y_val, shuffle=False)
         test_loader  = create_loader(X_te, y_te, shuffle=False)
 
@@ -128,6 +128,7 @@ if __name__ == "__main__":
 
     results = []
     Path("results").mkdir(exist_ok=True)
+    set_global_seed(RANDOM_SEED)
 
     for cfg in EXPERIMENT_CONFIGS:
         cfg.paradigm = "centralized"
