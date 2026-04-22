@@ -1,5 +1,14 @@
-  <h1>CIC-IDS-2018 DDoS Enhanced Dataset Generator</h1>
-  <p><h3>An autonomous, out-of-core pipeline for generating threat-intelligence-augmented synthetic PCAP datasets.</h3></p>
+  <h1>IP2Vec Evaluation on CIC-IDS-2018 Network Flow Dataset</h1>
+  <p><h3>Assessing the utility of IP2Vec embeddings combined with numeric flow features in centralized and federated learning settings.</h3></p>
+  <p>
+    <img src="https://img.shields.io/badge/Python-3.10+-blue.svg?logo=python&logoColor=white" alt="Python Version">
+    <img src="https://img.shields.io/badge/Apache_Spark-E25A1C.svg?logo=apachespark&logoColor=white" alt="PySpark">
+    <img src="https://img.shields.io/badge/PyTorch-EE4C2C.svg?logo=pytorch&logoColor=white" alt="PyTorch">
+    <img src="https://img.shields.io/badge/Optuna-4B0082.svg?logo=optuna&logoColor=white" alt="Optuna">
+    <img src="https://img.shields.io/badge/MLflow-0194E2.svg?logo=mlflow&logoColor=white" alt="MLflow">
+    <img src="https://img.shields.io/badge/Federated_Learning-Flower-FFCF00.svg?logo=flwr&logoColor=black" alt="Flower">
+    <img src="https://img.shields.io/badge/License-MIT-success.svg" alt="License">
+  </p>
 
 ---
 
@@ -8,8 +17,22 @@ This tool extracts the massive (~40-50GB uncompressed) **CIC-IDS-2018 improved d
 1. **Zero OOM (Out-of-Memory)**: Bypasses Pandas' memory constraints by leveraging PySpark's parallel `Parquet` MapReduce mapping.
 2. **Global Determinism**: A single `RANDOM_SEED` in `configs/settings.py` propagates across all PySpark sampling, PyTorch weight initialization, and Optuna trial seeds — guaranteeing identical results across runs.
 3. **Reproducible Threat Intel**: Fetches dynamic IPs from public Threat Intelligence repositories but caches them via `JSON` locally to guarantee stable downstream reproducibility across dataset generations.
-4. **SOTA Feature Engineering**: Applies PCA-based feature selection via **Global Variance-Weighted Importance Scoring** to distil ~75 raw features down to the most informative 25, eliminating noise before model training.
+4. **Feature Engineering**: Applies PCA-based feature selection via **Global Variance-Weighted Importance Scoring** to distil ~75 raw features down to the most informative 25, eliminating noise before model training.
 5. **Neural HPO Benchmark**: A dedicated Optuna + Hyperband search engine systematically explores four neural architectures across a rich hyperparameter space, logged end-to-end to MLflow.
+
+---
+
+## ⚡ Quick Start: Standard Workflow
+The simplest way to interact with the project is via the main orchestrator script. 
+The standard usage loop consists of 3 basic steps:
+run_pipeline.sh
+1. **Configure (`configs/settings.py`)**: Open the settings file and define your ML strategy, IP substitution flags, PCA features, and target ratios.
+2. **Run Pipeline**: Execute the orchestrator script to automatically handle ingestion, scaling, HPO, and experiments:
+   ```bash
+   ./run_pipeline.sh
+   ```
+   *(Need to start fresh? Run `./clean.sh` to remove all generated caches and models).*
+3. **Analyze Results**: Review the outputs generated in the `results/` and `data/visuals/` folders (academic charts, PDF metrics, Confusion Matrices).
 
 ---
 
@@ -65,7 +88,7 @@ graph TD
 | :--- | :--- | :--- |
 | **`core/ingestion.py`** | Downloads dataset, handles unzipping. Reads raw daily CSVs using `SparkSession`, creates deterministic subnet IP pools from both **malicious** (AbuseIPDB) and **benign** (Google/Bing/Apple) threat feeds. Injects IPs into Src/Dst fields, repartitions into out-of-core `unified_records.parquet`, tagging each row with `_source_day`. | PySpark SQL, UDFs |
 | **`core/dataset_loader.py`** | **Feature Store**. Loads RAW 40GB dataset lazily, applies virtual schema strategies (`raw`, `unsupervised`, `binary_collapse`, `undersample_majority`), and evaluates `USE_PCA`/`USE_IP2VEC` flags to deliver the correct feature matrix to the model. | PySpark ML DataFrame |
-| **`core/preprocessing.py`** | Label encoding (`StringIndexer`), continuous feature scaling (`StandardScaler`), **SOTA PCA-based feature selection** via Global Variance-Weighted Importance Scoring, parallel PCA projection (`pca_features`). Calls `ip2vec.py` for distributed Skip-gram embedding generation. Enforces `NET_ENTITIES` isolation list. | PySpark MLlib |
+| **`core/preprocessing.py`** | Label encoding (`StringIndexer`), continuous feature scaling (`StandardScaler`), **PCA-based feature selection** via Global Variance-Weighted Importance Scoring, parallel PCA projection (`pca_features`). Calls `ip2vec.py` for distributed Skip-gram embedding generation. Enforces `NET_ENTITIES` isolation list. | PySpark MLlib |
 | **`core/ip2vec.py`** | Transforms discrete network routing tokens into continuous latent vectors via native PySpark `Word2Vec` (Skip-gram). Applies **Token Prefixing** (`Protocol_6` vs `DstPort_6`). Performs advanced offline IP geolocation (Country/Type) leveraging **MaxMind GeoLite2** databases, accelerated by **Apache Arrow** via vectorized Pandas UDFs (`@pandas_udf`). | PySpark ML, GeoIP2, Apache Arrow |
 | **`core/visuals.py`** | Dedicated visualization engine. All output is academic-standard (serif fonts, minimal grid, 300 DPI PDF/PNG). Exposes `plot_dataset_statistics()`, `plot_pca_variance()`, `plot_training_curves()`, `plot_confusion_matrix()`. | matplotlib, seaborn |
 | **`core/utils.py`** | General I/O utilities: cross-tabulation report generation, feature manifest loading, temp directory cleanup. | Python stdlib |
@@ -99,6 +122,15 @@ Modify `configs/settings.py` to change dataset architectures. Available modes fo
 RANDOM_SEED = 42  # Single seed → propagated to PySpark, PyTorch, Optuna
 ```
 
+#### IP Substitution (NAT-like Mapping)
+To protect network topologies from bleeding into the latent embedding space (IP2Vec) while maintaining graph consistency:
+```python
+IP_SUBSTITUTION_ENABLED = True
+```
+- **True**: Replaces original dataset IPs with synthetic addresses drawn from Threat Intel (Attackers) and Benign Feeds (Victims). Uses a strict 1:1 NAT mapping engine that segregates Public and Private (RFC 1918) IP spaces to mathematically guarantee zero LAN collisions.
+- **False**: Retains original raw dataset IPs (useful for evaluating real topologies).
+A daily translation dictionary is saved to `preprocessed_cache/{day}/ip_translation_map.json`.
+
 #### ML Base Strategies (`ML_CLASS_STRATEGY`)
 - `"raw"` — Retains 100% of rows and original multi-class labels (for XGBoost/imbalanced learners)
 - `"unsupervised"` — Excludes attacks; serves pure continuous Benign baseline (for Autoencoders)
@@ -110,7 +142,7 @@ ML_CLASS_STRATEGY = "undersample_majority"
 TARGET_BENIGN_RATIO = 0.5  # 50% Benign / 50% Attack
 ```
 
-#### SOTA PCA Feature Selection
+#### PCA Feature Selection
 PCA is used not just for dimensionality reduction, but as a **feature extraction and selection engine**. The pipeline computes a **Global Variance-Weighted Importance Score** for each original feature across all principal components and physically retains only the top-N most informative columns:
 
 ```python

@@ -55,7 +55,7 @@ def run(args):
     plot_dataset_statistics(stats_file, visuals_dir)
     # -------------------------------------------------------------
     
-    from core.dataset_loader import get_dataset
+    from core.spark_sampling import get_dataset
     from configs.settings import ML_CLASS_STRATEGY, TARGET_BENIGN_RATIO
     from core.preprocessing import preprocess_spark
     

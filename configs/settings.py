@@ -100,11 +100,22 @@ SAMPLING_ENABLED = False
 SAMPLE_SIZE = 500000
 
 # ---------------------------------------------------------
+# IP SUBSTITUTION (NAT-like anonymisation)
+# ---------------------------------------------------------
+# When True  → original IPs are replaced with synthetic addresses drawn from
+#              Threat-Intel / Benign feeds using the collision-free translation
+#              table engine (private/public + malicious/benign segregation).
+# When False → original IPs from the raw CSV are kept as-is.  Use this to
+#              analyse the real dataset topology or to skip the network call
+#              to the external feeds entirely.
+IP_SUBSTITUTION_ENABLED = True
+
+# ---------------------------------------------------------
 # MACHINE LEARNING OUT-OF-CORE SETTINGS
 # ---------------------------------------------------------
 
 # ML_CLASS_STRATEGY defines how the final dataset matrix is served dynamically.
-# Supported strategies natively loaded via `core/dataset_loader.py`:
+# Supported strategies natively loaded via `core/spark_sampling.py`:
 # - "raw"                   -> Retains 100% of rows and true original multi-class labels.
 # - "unsupervised"          -> Excludes all attacks, serves purely continuous "Benign" baseline traffic.
 # - "binary_collapse"       -> Casts all 14 attack subtypes under a single boolean 'Attack' umbrella label.
@@ -135,7 +146,7 @@ PCA_FEATURE_SELECTION = True
 # Computed mathematically via Global Variance-Weighted Importance Scoring
 PCA_TARGET_FEATURES = 25
 
-# Active Strategy Flags resolved by `dataset_loader.py` during learning
+# Active Strategy Flags resolved by `spark_sampling.py` during learning
 USE_PCA = True
 USE_IP2VEC = True
 
@@ -151,10 +162,39 @@ USE_IP2VEC = True
 IP2VEC_SENTENCE = ["Dst Port", "Protocol", "Src Region"]
 
 # ---------------------------------------------------------
-# EXPERIMENT FRAMEWORK — HPO PARAMS PATH
+# EXPERIMENT FRAMEWORK — TRAINING & VALIDATION
+# ---------------------------------------------------------
+# Number of folds for Stratified K-Fold cross-validation (centralized & federated).
+KF_SPLITS = 5
+
+# Fraction of each training fold reserved for in-fold validation.
+VAL_FRACTION = 0.15
+
+# Mini-batch size used in all DataLoaders.
+BATCH_SIZE = 512
+
+# Number of training epochs for the final experiment runs.
+TRAIN_EPOCHS = 15
+
+# ---------------------------------------------------------
+# EXPERIMENT FRAMEWORK — HPO
 # ---------------------------------------------------------
 # Template for per-config HPO results. Use config.name to resolve.
 HPO_PARAMS_TEMPLATE = "best_params_{config_name}.json"
+
+# Default number of Optuna trials when running run_hpo.py.
+HPO_N_TRIALS = 30
+
+# Fraction of data used during HPO (smaller = faster).
+HPO_SAMPLE_FRAC = 0.2
+
+# Epochs per HPO trial (fewer than full training to keep HPO fast).
+HPO_EPOCHS = 10
+
+# ---------------------------------------------------------
+# SPARK MEMORY SETTINGS
+# ---------------------------------------------------------
+SPARK_DRIVER_MEMORY = "6g"
 
 # ---------------------------------------------------------
 # FEDERATED LEARNING SETTINGS (Flower)
@@ -165,3 +205,7 @@ FL_LOCAL_EPOCHS    = 3      # Local epochs per client per round
 FL_FRACTION_FIT    = 1.0    # Fraction of clients selected per round
 FL_MIN_FIT_CLIENTS = 3      # Minimum clients for training
 FL_MIN_AVAILABLE   = 3      # Minimum clients that must be available
+
+# GPU fraction allocated per Ray/Flower client actor (simulation mode).
+# Example: 0.2 allows 5 concurrent actors on a single GPU.
+FL_CLIENT_GPU_FRACTION = 0.2

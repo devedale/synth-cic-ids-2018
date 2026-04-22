@@ -25,6 +25,11 @@ def generate_report():
     df_fed["display_name"] = df_fed["config_name"] + " (F)"
     
     df_all = pd.concat([df_cent, df_fed], ignore_index=True)
+    
+    # Reorder columns to put display_name and paradigm at the start for readability
+    cols = ["paradigm"] + [c for c in df_all.columns if c not in ["paradigm"]]
+    df_all = df_all[cols]
+    
     df_all.to_csv(out_dir / "full_comparison_report.csv", index=False)
     print(f"Saved full comparison report to {out_dir / 'full_comparison_report.csv'}")
     

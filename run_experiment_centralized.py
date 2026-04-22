@@ -1,79 +1,139 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Centralized experiment runner with Stratified K-Fold (k=5) cross-validation.
+
+Each fold trains on 80% of the full dataset and tests on the held-out 20%.
+Final metrics are averaged across all k folds so they are directly comparable
+with the federated runner, which uses the same fold splits.
+"""
 import argparse
-import pandas as pd
-import torch
-import time
 import json
+import time
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
+import torch
+from sklearn.model_selection import StratifiedKFold
+
+from configs.settings import RANDOM_SEED
+from core.visuals import plot_confusion_matrix, plot_training_curves
 from experiments.configs import EXPERIMENT_CONFIGS, ExperimentConfig
-from experiments.data_loader import load_tensors, create_loader
-from experiments.model import build_model
-from experiments.trainer import run_training, eval_epoch
+from experiments.data_loader import create_loader, load_full_tensors
 from experiments.metrics import compute_full_metrics
-from core.visuals import plot_training_curves, plot_confusion_matrix
+from experiments.model import build_model
+from experiments.trainer import eval_epoch, run_training
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+KF_SPLITS = 5
+
 
 def run_centralized_for_config(cfg: ExperimentConfig, sample_frac: float, epochs: int) -> dict:
-    print(f"\n{'='*60}\nRunning Centralized for {cfg.name}\n{'='*60}")
+    print(f"\n{'='*60}\nRunning Centralized (Stratified {KF_SPLITS}-Fold CV) — {cfg.name}\n{'='*60}")
     t0 = time.time()
-    
-    X_train, X_val, X_test, y_train, y_val, y_test, class_names = load_tensors(cfg, sample_frac)
-    
-    input_dim = X_train.shape[1]
+
+    # ── Load the full dataset (rare classes already filtered for k-fold) ─────
+    X, y, class_names = load_full_tensors(cfg, sample_frac=sample_frac, k=KF_SPLITS)
+    y_np = y.numpy()
     n_classes = len(class_names)
-    
-    model = build_model(input_dim, n_classes, cfg).to(DEVICE)
-    
-    train_loader = create_loader(X_train, y_train, shuffle=True)
-    val_loader = create_loader(X_val, y_val, shuffle=False)
-    test_loader = create_loader(X_test, y_test, shuffle=False)
-    
-    history = run_training(model, train_loader, val_loader, cfg, epochs, DEVICE)
-    
-    test_res = eval_epoch(model, test_loader, DEVICE)
-    
-    metrics = compute_full_metrics(test_res["y"], test_res["preds"], test_res["probs"], class_names, t0)
-    
+
+    skf = StratifiedKFold(n_splits=KF_SPLITS, shuffle=True, random_state=RANDOM_SEED)
+
+    fold_metrics: list[dict] = []
+    last_test_res = None
+    last_train_idx = last_test_idx = None
+
+    for fold, (train_idx, test_idx) in enumerate(skf.split(X, y_np), start=1):
+        print(f"\n  ── Fold {fold}/{KF_SPLITS}  (train={len(train_idx):,}, test={len(test_idx):,}) ──")
+
+        X_tr, y_tr = X[train_idx], y[train_idx]
+        X_te, y_te = X[test_idx],  y[test_idx]
+
+        # Use 15% of the training fold as validation (same ratio as before)
+        val_size = max(1, int(len(train_idx) * 0.15))
+        rng = np.random.default_rng(RANDOM_SEED + fold)
+        val_local_idx = rng.choice(len(train_idx), size=val_size, replace=False)
+        train_local_idx = np.setdiff1d(np.arange(len(train_idx)), val_local_idx)
+
+        X_val, y_val = X_tr[val_local_idx], y_tr[val_local_idx]
+        X_train_f, y_train_f = X_tr[train_local_idx], y_tr[train_local_idx]
+
+        input_dim = X.shape[1]
+        model = build_model(input_dim, n_classes, cfg).to(DEVICE)
+
+        train_loader = create_loader(X_train_f, y_train_f, shuffle=True)
+        val_loader   = create_loader(X_val, y_val, shuffle=False)
+        test_loader  = create_loader(X_te, y_te, shuffle=False)
+
+        history = run_training(model, train_loader, val_loader, cfg, epochs, DEVICE)
+
+        test_res = eval_epoch(model, test_loader, DEVICE)
+        metrics  = compute_full_metrics(test_res["y"], test_res["preds"], test_res["probs"], class_names, t0)
+        fold_metrics.append(metrics)
+
+        print(f"  Fold {fold} → Acc={metrics['accuracy']:.4f}  AUC={metrics['auc_roc']:.4f}  "
+              f"F1={metrics['f1']:.4f}  FPR={metrics['fpr']:.4f}")
+
+        last_test_res = test_res
+        last_train_idx, last_test_idx = train_idx, test_idx
+
+    # ── Average metrics across all folds ─────────────────────────────────────
+    avg_metrics: dict = {}
+    for key in fold_metrics[0]:
+        vals = [m[key] for m in fold_metrics]
+        avg_metrics[key] = float(np.mean(vals))
+        avg_metrics[f"{key}_std"] = float(np.std(vals))
+
+    # exec_time_s counts the total wall-clock for all folds
+    avg_metrics["exec_time_s"] = time.time() - t0
+
+    print(f"\n[{cfg.name}] K-Fold Averages → "
+          f"Acc={avg_metrics['accuracy']:.4f}±{avg_metrics['accuracy_std']:.4f}  "
+          f"AUC={avg_metrics['auc_roc']:.4f}±{avg_metrics['auc_roc_std']:.4f}")
+
+    # ── Persist outputs (using last fold's model/predictions) ─────────────────
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     with open(cfg.output_dir / "metrics.json", "w") as f:
-        json.dump(metrics, f, indent=2)
-        
+        json.dump(avg_metrics, f, indent=2)
+
     plot_training_curves(history, cfg.output_dir)
-    
+
     plot_confusion_matrix(
-        test_res["y"], test_res["preds"], class_names,
-        title=f"Supervised CM: {cfg.name}",
+        last_test_res["y"], last_test_res["preds"], class_names,
+        title=f"Supervised CM: {cfg.name} (last fold)",
         output_path=cfg.output_dir / "cm_supervised.png",
-        cmap="Blues"
+        cmap="Blues",
     )
-    
-    y_bin = (test_res["y"] > 0).astype(int)
-    y_pred_bin = (test_res["preds"] > 0).astype(int)
+
+    y_bin      = (last_test_res["y"]     > 0).astype(int)
+    y_pred_bin = (last_test_res["preds"] > 0).astype(int)
     plot_confusion_matrix(
         y_bin, y_pred_bin, ["Benign", "Attack"],
-        title=f"Anomaly CM: {cfg.name}",
+        title=f"Anomaly CM: {cfg.name} (last fold)",
         output_path=cfg.output_dir / "cm_anomaly.png",
-        cmap="Reds"
+        cmap="Reds",
     )
-    
-    print(f"[{cfg.name}] Accuracy: {metrics['accuracy']:.4f}, AUC: {metrics['auc_roc']:.4f}")
-    return {"config_name": cfg.name, **metrics}
+
+    return {"config_name": cfg.name, **avg_metrics}
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--epochs", type=int, default=15)
-    parser.add_argument("--sample", type=float, default=0.3)
+    parser.add_argument("--sample", type=float, default=1.0,
+                        help="Fraction of dataset to use (1.0 = full dataset)")
     args = parser.parse_args()
-    
+
     results = []
     Path("results").mkdir(exist_ok=True)
+
     for cfg in EXPERIMENT_CONFIGS:
         cfg.paradigm = "centralized"
         res = run_centralized_for_config(cfg, args.sample, args.epochs)
         results.append(res)
-        
+
     df = pd.DataFrame(results)
     df.to_csv("results/centralized_results.csv", index=False)
     print("\nCentralized experiments completed. Results saved to results/centralized_results.csv")

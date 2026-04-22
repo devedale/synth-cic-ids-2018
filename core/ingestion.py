@@ -20,6 +20,7 @@ from configs.settings import (
     BASE_MALICIOUS_IPS,
     BASE_GOOD_PUBLIC_IPS,
     RANDOM_SEED,
+    IP_SUBSTITUTION_ENABLED,
 )
 
 class Ingestion:
@@ -62,16 +63,20 @@ class Ingestion:
         # 1. Download and extract local Dataset
         self._download_and_extract_dataset()
 
-        self.malicious_ips = self._fetch_feed_ips(self.malicious_feeds, BASE_MALICIOUS_IPS, "malicious", force_redownload=force_rerun)
-        self.good_public_ips = self._fetch_feed_ips(self.benign_feeds, BASE_GOOD_PUBLIC_IPS, "benign", force_redownload=force_rerun)
+        self.malicious_ips = []
+        self.good_public_ips = []
+        if IP_SUBSTITUTION_ENABLED:
+            self.malicious_ips = self._fetch_feed_ips(self.malicious_feeds, BASE_MALICIOUS_IPS, "malicious", force_redownload=force_rerun)
+            self.good_public_ips = self._fetch_feed_ips(self.benign_feeds, BASE_GOOD_PUBLIC_IPS, "benign", force_redownload=force_rerun)
 
         # Balance: if malicious pool is larger, oversample benign by random repetition
-        import random as _random
-        n_mal, n_ben = len(self.malicious_ips), len(self.good_public_ips)
-        if n_mal > n_ben:
-            extra = _random.choices(self.good_public_ips, k=n_mal - n_ben)
-            self.good_public_ips = self.good_public_ips + extra
-            print(f"[ingestion] Benign pool padded: {n_ben} → {len(self.good_public_ips)} IPs (matches malicious pool size)")
+        if IP_SUBSTITUTION_ENABLED:
+            import random as _random
+            n_mal, n_ben = len(self.malicious_ips), len(self.good_public_ips)
+            if n_mal > n_ben:
+                extra = _random.choices(self.good_public_ips, k=n_mal - n_ben)
+                self.good_public_ips = self.good_public_ips + extra
+                print(f"[ingestion] Benign pool padded: {n_ben} → {len(self.good_public_ips)} IPs (matches malicious pool size)")
 
         for day in selected_days:
             if force_rerun:
@@ -208,9 +213,10 @@ class Ingestion:
         return pool
 
     def _process_day_pyspark(self, day: str) -> None:
-        """Read 4GB CSV using PySpark MapReduce, randomize IP addresses, and write to Parquet cache."""
+        """Read 4GB CSV using PySpark MapReduce, assign NAT-like IP mappings if enabled, and write to Parquet cache."""
         import random
-        from pyspark.sql import SparkSession
+        from itertools import chain
+        from pyspark.sql import SparkSession, Row
         import pyspark.sql.functions as F
         from pyspark.sql.types import StringType
         
@@ -230,16 +236,6 @@ class Ingestion:
         print(f"[ingestion] Loaded file in Spark: {csv_path.name}")
         df = spark.read.csv(str(csv_path), header=True, inferSchema=False)
         
-        # IP Feeds logic
-        mixed_pool = self._generate_mixed_pool(min(10000, df.count() if df.count() > 0 else 1000))
-        malicious_pool = self.malicious_ips if self.malicious_ips else ["198.51.100.1"]
-        
-        def assign_malicious_src(): return random.choice(malicious_pool)
-        def assign_random_ip(): return random.choice(mixed_pool)
-        
-        assign_malicious_src_udf = F.udf(assign_malicious_src, StringType())
-        assign_random_ip_udf = F.udf(assign_random_ip, StringType())
-        
         # Make sure the IP columns exist
         if "Src IP" not in df.columns:
             df = df.withColumn("Src IP", F.lit(""))
@@ -247,18 +243,30 @@ class Ingestion:
             df = df.withColumn("Dst IP", F.lit(""))
             
         label_col = "Label" if "Label" in df.columns else None
-        if not label_col:
-            df_processed = df.withColumn("Src IP", assign_random_ip_udf())\
-                             .withColumn("Dst IP", assign_random_ip_udf())
-        else:
-            is_attack_cond = (F.trim(F.lower(F.col(label_col))) != "benign")
+
+        # IP Translation Logic (NAT-like strict 1:1 Mapping)
+        df_processed = df
+        if IP_SUBSTITUTION_ENABLED:
+            print("[ingestion] Building NAT-like strict 1:1 Translation Table...")
+            from core.ip_translation import build_translation_table, apply_ip_translation
             
-            df_processed = df.withColumn("Src IP", F.when(is_attack_cond, assign_malicious_src_udf()).otherwise(assign_random_ip_udf()))\
-                             .withColumn("Dst IP", assign_random_ip_udf())
-        
+            ip_map = build_translation_table(df, self.malicious_ips, self.good_public_ips)
+            print(f"[ingestion] Applying mapping to {len(ip_map)} unique IPs via Broadcast Join...")
+            
+            df_processed = apply_ip_translation(spark, df, ip_map)
+        else:
+            print("[ingestion] IP Substitution Disabled. Retaining original dataset IPs.")
+
         # Save output partitions
         day_cache = self._day_cache_dir(day)
         day_cache.mkdir(parents=True, exist_ok=True)
+        
+        if IP_SUBSTITUTION_ENABLED and 'ip_map' in locals():
+            import json
+            map_path = day_cache / "ip_translation_map.json"
+            with open(map_path, "w") as f:
+                json.dump(ip_map, f, indent=4)
+            print(f"[ingestion] Saved IP translation map to {map_path}")
         
         # Tag origin day for ML statistics loader tracking before saving RAW block
         df_processed = df_processed.withColumn("_source_day", F.lit(day))
