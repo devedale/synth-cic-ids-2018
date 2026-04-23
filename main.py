@@ -38,6 +38,7 @@ def run(args):
         .config("spark.memory.storageFraction", "0.3")
         .config("spark.local.dir", str(spark_tmp))
         .config("spark.sql.shuffle.partitions", "200")
+        .config("spark.sql.codegen.wholeStage", False)
         .getOrCreate()
     )
     
