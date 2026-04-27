@@ -17,6 +17,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import ray
 import torch
 import flwr as fl
 from sklearn.model_selection import StratifiedKFold
@@ -120,6 +121,13 @@ def run_federated_for_config(cfg: ExperimentConfig, sample_frac: float) -> dict:
     print(f"\n{'='*60}\nRunning Federated (Stratified {KF_SPLITS}-Fold CV) — {cfg.name}\n{'='*60}")
     t0 = time.time()
 
+    # ── Read HPO Params (e.g. batch_size) ────────────────────────────────────
+    hpo_params = {}
+    if cfg.hpo_params_path.exists():
+        with open(cfg.hpo_params_path, "r") as f:
+            hpo_params = json.load(f)
+    batch_sz = hpo_params.get("batch_size", 512)
+
     # Load full dataset with same rare-class filter as centralized
     X, y, class_names = load_full_tensors(cfg, sample_frac=sample_frac, k=KF_SPLITS)
     y_np = y.numpy()
@@ -152,8 +160,8 @@ def run_federated_for_config(cfg: ExperimentConfig, sample_frac: float) -> dict:
         client_size  = dataset_size // FL_NUM_CLIENTS
 
         global_model = build_model(input_dim, n_classes, cfg).to(DEVICE)
-        val_loader   = create_loader(X_val, y_val, shuffle=False)
-        test_loader  = create_loader(X_te, y_te, shuffle=False)
+        val_loader   = create_loader(X_val, y_val, batch_size=batch_sz, shuffle=False)
+        test_loader  = create_loader(X_te, y_te, batch_size=batch_sz, shuffle=False)
 
         def client_fn(context: Context) -> fl.client.Client:
             cid = int(context.node_id) % FL_NUM_CLIENTS
@@ -167,8 +175,8 @@ def run_federated_for_config(cfg: ExperimentConfig, sample_frac: float) -> dict:
             # ─────────────────────────────────────────────────────────────
             start = cid * client_size
             end   = min((cid + 1) * client_size, dataset_size)
-            cl_loader = create_loader(X_train_f[start:end], y_train_f[start:end], shuffle=True, seed=actor_seed)
-            cl_val    = create_loader(X_val, y_val, shuffle=False)
+            cl_loader = create_loader(X_train_f[start:end], y_train_f[start:end], batch_size=batch_sz, shuffle=True, seed=actor_seed)
+            cl_val    = create_loader(X_val, y_val, batch_size=batch_sz, shuffle=False)
             cl_model  = build_model(input_dim, n_classes, cfg)
             return IDSClient(cl_model, cl_loader, cl_val, cfg).to_client()
 
@@ -180,10 +188,10 @@ def run_federated_for_config(cfg: ExperimentConfig, sample_frac: float) -> dict:
             min_available_clients=FL_MIN_AVAILABLE,
         )
 
-        client_resources = {
-            "num_cpus": 1,
-            "num_gpus": 0.2 if torch.cuda.is_available() else 0.0,
-        }
+        # local_mode runs everything in-process → GPU access is direct via
+        # DEVICE, not through Ray's resource allocator.  Request 0 GPUs to
+        # avoid an empty ActorPool when Ray reports 0 available GPUs.
+        client_resources = {"num_cpus": 1, "num_gpus": 0.0}
 
         fl.simulation.start_simulation(
             client_fn=client_fn,
@@ -191,6 +199,7 @@ def run_federated_for_config(cfg: ExperimentConfig, sample_frac: float) -> dict:
             config=fl.server.ServerConfig(num_rounds=FL_NUM_ROUNDS),
             strategy=strategy,
             client_resources=client_resources,
+            ray_init_args={"local_mode": True},
         )
 
         fold_test_res = strategy.best_res
@@ -247,7 +256,7 @@ def run_federated_for_config(cfg: ExperimentConfig, sample_frac: float) -> dict:
         cmap="Reds",
     )
 
-    return {"config_name": cfg.name, **avg_metrics}
+    return {"config_name": cfg.name, **avg_metrics, **hpo_params}
 
 
 if __name__ == "__main__":
@@ -261,6 +270,7 @@ if __name__ == "__main__":
     set_global_seed(RANDOM_SEED)
 
     for cfg in EXPERIMENT_CONFIGS:
+        set_global_seed(RANDOM_SEED)
         cfg.paradigm = "federated"
         res = run_federated_for_config(cfg, args.sample)
         results.append(res)

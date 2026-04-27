@@ -44,33 +44,40 @@ class MLP(nn.Module):
 
 
 class _ResBlock(nn.Module):
-    def __init__(self, dim: int, dropout: float, activation: str = "relu"):
+    def __init__(self, in_dim: int, out_dim: int, dropout: float, activation: str = "relu"):
         super().__init__()
         self.block = nn.Sequential(
-            nn.Linear(dim, dim), nn.BatchNorm1d(dim), _act(activation),
+            nn.Linear(in_dim, out_dim), nn.BatchNorm1d(out_dim), _act(activation),
             nn.Dropout(dropout),
-            nn.Linear(dim, dim), nn.BatchNorm1d(dim),
+            nn.Linear(out_dim, out_dim), nn.BatchNorm1d(out_dim),
         )
+        self.proj = nn.Linear(in_dim, out_dim) if in_dim != out_dim else nn.Identity()
         self._act_out = _act(activation)
 
     def forward(self, x):
-        return self._act_out(self.block(x) + x)
+        return self._act_out(self.block(x) + self.proj(x))
 
 
 class ResNetTabular(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        hidden_dim: int,
-        n_blocks: int,
+        hidden_dims: List[int],
         dropout: float = 0.2,
         n_classes: int = 2,
         activation: str = "relu",
     ):
         super().__init__()
-        self.stem   = nn.Sequential(nn.Linear(input_dim, hidden_dim), _act(activation))
-        self.blocks = nn.Sequential(*[_ResBlock(hidden_dim, dropout, activation) for _ in range(n_blocks)])
-        self.head   = nn.Linear(hidden_dim, n_classes)
+        self.stem = nn.Sequential(nn.Linear(input_dim, hidden_dims[0]), _act(activation))
+        
+        blocks = []
+        in_d = hidden_dims[0]
+        for out_d in hidden_dims:
+            blocks.append(_ResBlock(in_d, out_d, dropout, activation))
+            in_d = out_d
+            
+        self.blocks = nn.Sequential(*blocks)
+        self.head   = nn.Linear(hidden_dims[-1], n_classes)
 
     def forward(self, x):
         return self.head(self.blocks(self.stem(x)))
@@ -80,20 +87,23 @@ class CNN1D(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        n_filters: int,
-        kernel: int,
+        filters: List[int],
+        kernels: List[int],
         dropout: float = 0.2,
         n_classes: int = 2,
         activation: str = "relu",
     ):
         super().__init__()
-        pad = kernel // 2
-        self.conv = nn.Sequential(
-            nn.Conv1d(1, n_filters, kernel, padding=pad), _act(activation),
-            nn.Conv1d(n_filters, n_filters * 2, kernel, padding=pad), _act(activation),
-            nn.AdaptiveAvgPool1d(1),
-        )
-        self.head = nn.Sequential(nn.Dropout(dropout), nn.Linear(n_filters * 2, n_classes))
+        layers = []
+        in_c = 1
+        for f, k in zip(filters, kernels):
+            pad = k // 2
+            layers += [nn.Conv1d(in_c, f, k, padding=pad), _act(activation)]
+            in_c = f
+            
+        layers.append(nn.AdaptiveAvgPool1d(1))
+        self.conv = nn.Sequential(*layers)
+        self.head = nn.Sequential(nn.Dropout(dropout), nn.Linear(filters[-1], n_classes))
 
     def forward(self, x):
         z = self.conv(x.unsqueeze(1)).squeeze(-1)
@@ -106,23 +116,32 @@ class AutoencoderClassifier(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        hidden_dim: int,
+        hidden_dims: List[int],
         latent_dim: int,
         dropout: float = 0.2,
         n_classes: int = 2,
         activation: str = "relu",
     ):
         super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim), nn.BatchNorm1d(hidden_dim), _act(activation),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, latent_dim), nn.BatchNorm1d(latent_dim), _act(activation),
-        )
-        self.decoder = nn.Sequential(
-            nn.Linear(latent_dim, hidden_dim), nn.BatchNorm1d(hidden_dim), _act(activation),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, input_dim),
-        )
+        
+        # Encoder
+        enc_layers = []
+        prev = input_dim
+        for h in hidden_dims:
+            enc_layers += [nn.Linear(prev, h), nn.BatchNorm1d(h), _act(activation), nn.Dropout(dropout)]
+            prev = h
+        enc_layers += [nn.Linear(prev, latent_dim), nn.BatchNorm1d(latent_dim), _act(activation)]
+        self.encoder = nn.Sequential(*enc_layers)
+        
+        # Decoder (symmetric)
+        dec_layers = []
+        prev = latent_dim
+        for h in reversed(hidden_dims):
+            dec_layers += [nn.Linear(prev, h), nn.BatchNorm1d(h), _act(activation), nn.Dropout(dropout)]
+            prev = h
+        dec_layers += [nn.Linear(prev, input_dim)]
+        self.decoder = nn.Sequential(*dec_layers)
+        
         self.classifier = nn.Sequential(
             nn.Dropout(dropout),
             nn.Linear(latent_dim, n_classes),
@@ -138,7 +157,15 @@ class AutoencoderClassifier(nn.Module):
 # ── Model factory (reads saved HPO params) ────────────────────────────────────
 
 def build_model(input_dim: int, num_classes: int, cfg: ExperimentConfig) -> nn.Module:
-    """Loads best HPO params and reconstructs the optimal model."""
+    """Loads best HPO params and reconstructs the optimal model.
+
+    Reseeds torch before construction so that layer weight initialisation
+    is identical regardless of how much global RNG state was consumed
+    by prior operations (other configs, data loading, etc.).
+    """
+    from configs.settings import RANDOM_SEED
+    torch.manual_seed(RANDOM_SEED)
+
     if not cfg.hpo_params_path.exists():
         print(f"[{cfg.name}] Warning: HPO params not found at {cfg.hpo_params_path}. Using fallback MLP.")
         return MLP(input_dim, [256, 128, 64], 0.2, num_classes)
@@ -157,19 +184,21 @@ def build_model(input_dim: int, num_classes: int, cfg: ExperimentConfig) -> nn.M
         return MLP(input_dim, dims, dropout, num_classes, activation)
 
     elif arch == "resnet":
-        hidden  = p.get("resnet_hidden", 128)
         n_blks  = p.get("resnet_n_blocks", 2)
-        return ResNetTabular(input_dim, hidden, n_blks, dropout, num_classes, activation)
+        dims = [p.get(f"resnet_hidden_{i}", p.get("resnet_hidden", 128)) for i in range(n_blks)]
+        return ResNetTabular(input_dim, dims, dropout, num_classes, activation)
 
     elif arch == "cnn1d":
-        n_filters = p.get("cnn_filters", 64)
-        kernel    = p.get("cnn_kernel", 3)
-        return CNN1D(input_dim, n_filters, kernel, dropout, num_classes, activation)
+        n_layers = p.get("cnn_n_layers", 2)
+        filters = [p.get(f"cnn_filters_{i}", p.get("cnn_filters", 64)) for i in range(n_layers)]
+        kernels = [p.get(f"cnn_kernel_{i}", p.get("cnn_kernel", 3)) for i in range(n_layers)]
+        return CNN1D(input_dim, filters, kernels, dropout, num_classes, activation)
 
     else:  # autoencoder
-        hidden = p.get("ae_hidden", 256)
+        n_layers = p.get("ae_n_layers", 1)
+        dims = [p.get(f"ae_hidden_{i}", p.get("ae_hidden", 256)) for i in range(n_layers)]
         latent = p.get("ae_latent", 32)
-        return AutoencoderClassifier(input_dim, hidden, latent, dropout, num_classes, activation)
+        return AutoencoderClassifier(input_dim, dims, latent, dropout, num_classes, activation)
 
 
 # ── Optimizer factory (reads saved HPO params) ────────────────────────────────

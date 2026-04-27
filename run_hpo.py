@@ -60,31 +60,41 @@ def _build_trial_model(trial, input_dim: int, n_classes: int):
 
     if arch == "mlp":
         n_layers = trial.suggest_int("mlp_n_layers", 2, 6)
-        hidden = trial.suggest_categorical(
-            "mlp_hidden", [64, 128, 256, 512, 1024]
-        )
-        # Vary width per layer (wide-then-narrow or uniform)
-        taper = trial.suggest_categorical("mlp_taper", [True, False])
-        if taper:
-            dims = [max(32, hidden // (2 ** i)) for i in range(n_layers)]
-        else:
-            dims = [hidden] * n_layers
+        # Vary width per layer independently
+        dims = [
+            trial.suggest_categorical(f"mlp_hidden_{i}", [32, 64, 128, 256, 512, 1024])
+            for i in range(n_layers)
+        ]
         return MLP(input_dim, dims, dropout, n_classes, activation=activation)
 
     elif arch == "resnet":
-        hidden = trial.suggest_categorical("resnet_hidden", [64, 128, 256, 512])
         n_blocks = trial.suggest_int("resnet_n_blocks", 2, 6)
-        return ResNetTabular(input_dim, hidden, n_blocks, dropout, n_classes, activation=activation)
+        dims = [
+            trial.suggest_categorical(f"resnet_hidden_{i}", [64, 128, 256, 512])
+            for i in range(n_blocks)
+        ]
+        return ResNetTabular(input_dim, dims, dropout, n_classes, activation=activation)
 
     elif arch == "cnn1d":
-        n_filters = trial.suggest_categorical("cnn_filters", [32, 64, 128, 256])
-        kernel = trial.suggest_categorical("cnn_kernel", [3, 5, 7])
-        return CNN1D(input_dim, n_filters, kernel, dropout, n_classes, activation=activation)
+        n_layers = trial.suggest_int("cnn_n_layers", 2, 5)
+        filters = [
+            trial.suggest_categorical(f"cnn_filters_{i}", [32, 64, 128, 256])
+            for i in range(n_layers)
+        ]
+        kernels = [
+            trial.suggest_categorical(f"cnn_kernel_{i}", [3, 5, 7])
+            for i in range(n_layers)
+        ]
+        return CNN1D(input_dim, filters, kernels, dropout, n_classes, activation=activation)
 
     elif arch == "autoencoder":
-        hidden = trial.suggest_categorical("ae_hidden", [128, 256, 512])
+        n_layers = trial.suggest_int("ae_n_layers", 1, 4)
+        dims = [
+            trial.suggest_categorical(f"ae_hidden_{i}", [64, 128, 256, 512])
+            for i in range(n_layers)
+        ]
         latent = trial.suggest_categorical("ae_latent", [16, 32, 64, 128])
-        return AutoencoderClassifier(input_dim, hidden, latent, dropout, n_classes, activation=activation)
+        return AutoencoderClassifier(input_dim, dims, latent, dropout, n_classes, activation=activation)
 
 
 # ── Objective factory ─────────────────────────────────────────────────────────
@@ -111,7 +121,8 @@ def create_objective(cfg: ExperimentConfig, X_train, y_train, X_val, y_val, n_cl
 
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
-        train_loader = create_loader(X_train, y_train, batch_size=batch_sz, shuffle=True)
+        train_loader = create_loader(X_train, y_train, batch_size=batch_sz, shuffle=True,
+                                      seed=RANDOM_SEED + trial.number)
         val_loader   = create_loader(X_val,   y_val,   batch_size=batch_sz, shuffle=False)
 
         best_auc = 0.0
@@ -173,4 +184,5 @@ if __name__ == "__main__":
 
     for cfg in EXPERIMENT_CONFIGS:
         if args.config == "ALL" or cfg.name == args.config:
+            set_global_seed(RANDOM_SEED)
             run_hpo_for_config(cfg, args.trials, args.sample, args.epochs)

@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# ── Determinism: must be exported BEFORE the Python interpreter starts ──
+export PYTHONHASHSEED=42
+export CUBLAS_WORKSPACE_CONFIG=":4096:8"
+
 echo "========================================================="
 echo "  CICIDS-2018 Experimental Pipeline Orchestrator"
 echo "========================================================="

@@ -103,6 +103,8 @@ def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_
     
     # 4. Native PySpark Skip-gram Neural Word2Vec training
     print("[ip2vec] Training Native PySpark Word2Vec (Skip-gram) distributed model...")
+    from configs.settings import RANDOM_SEED
+
     word2vec = Word2Vec(
         vectorSize=vector_size, 
         minCount=1,
@@ -111,6 +113,7 @@ def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_
         outputCol="ip2vec_embeddings",
         windowSize=2,
         numPartitions=4,
+        seed=RANDOM_SEED,
     )
     
     model = word2vec.fit(df)

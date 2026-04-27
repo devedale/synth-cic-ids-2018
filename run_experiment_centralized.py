@@ -17,7 +17,7 @@ import pandas as pd
 import torch
 from sklearn.model_selection import StratifiedKFold
 
-from configs.settings import RANDOM_SEED, set_global_seed
+from configs.settings import RANDOM_SEED, set_global_seed, IP2VEC_SENTENCE
 from core.visuals import plot_confusion_matrix, plot_training_curves
 from experiments.configs import EXPERIMENT_CONFIGS, ExperimentConfig
 from experiments.data_loader import create_loader, load_full_tensors
@@ -32,6 +32,13 @@ KF_SPLITS = 5
 def run_centralized_for_config(cfg: ExperimentConfig, sample_frac: float, epochs: int) -> dict:
     print(f"\n{'='*60}\nRunning Centralized (Stratified {KF_SPLITS}-Fold CV) — {cfg.name}\n{'='*60}")
     t0 = time.time()
+
+    # ── Read HPO Params (e.g. batch_size) ────────────────────────────────────
+    hpo_params = {}
+    if cfg.hpo_params_path.exists():
+        with open(cfg.hpo_params_path, "r") as f:
+            hpo_params = json.load(f)
+    batch_sz = hpo_params.get("batch_size", 512)
 
     # ── Load the full dataset (rare classes already filtered for k-fold) ─────
     X, y, class_names = load_full_tensors(cfg, sample_frac=sample_frac, k=KF_SPLITS)
@@ -62,9 +69,9 @@ def run_centralized_for_config(cfg: ExperimentConfig, sample_frac: float, epochs
         input_dim = X.shape[1]
         model = build_model(input_dim, n_classes, cfg).to(DEVICE)
 
-        train_loader = create_loader(X_train_f, y_train_f, shuffle=True, seed=RANDOM_SEED + fold)
-        val_loader   = create_loader(X_val, y_val, shuffle=False)
-        test_loader  = create_loader(X_te, y_te, shuffle=False)
+        train_loader = create_loader(X_train_f, y_train_f, batch_size=batch_sz, shuffle=True, seed=RANDOM_SEED + fold)
+        val_loader   = create_loader(X_val, y_val, batch_size=batch_sz, shuffle=False)
+        test_loader  = create_loader(X_te, y_te, batch_size=batch_sz, shuffle=False)
 
         history = run_training(model, train_loader, val_loader, cfg, epochs, DEVICE)
 
@@ -116,7 +123,10 @@ def run_centralized_for_config(cfg: ExperimentConfig, sample_frac: float, epochs
         cmap="Reds",
     )
 
-    return {"config_name": cfg.name, **avg_metrics}
+    # Add IP2VEC_SENTENCE to results if applicable
+    sentence_str = " | ".join(IP2VEC_SENTENCE) if cfg.use_ip2vec else "N/A"
+
+    return {"config_name": cfg.name, "ip2vec_sentence": sentence_str, **avg_metrics, **hpo_params}
 
 
 if __name__ == "__main__":
@@ -131,6 +141,7 @@ if __name__ == "__main__":
     set_global_seed(RANDOM_SEED)
 
     for cfg in EXPERIMENT_CONFIGS:
+        set_global_seed(RANDOM_SEED)
         cfg.paradigm = "centralized"
         res = run_centralized_for_config(cfg, args.sample, args.epochs)
         results.append(res)

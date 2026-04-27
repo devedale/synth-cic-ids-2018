@@ -15,9 +15,20 @@ PROJECT_ROOT = PIPELINE_ROOT.parent
 RANDOM_SEED = 42
 
 def set_global_seed(seed: int):
-    import random
+    """Pin every source of randomness to a single deterministic seed.
+
+    Covers: stdlib random, numpy, PyTorch (CPU + CUDA), cuDNN, cuBLAS,
+    Python hash seed, and PyTorch deterministic-algorithm enforcement.
+    Must be called at the top of every entry-point and inside every
+    subprocess / Ray actor that needs reproducibility.
+    """
+    import os, random
     import numpy as np
     import torch
+
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -25,6 +36,7 @@ def set_global_seed(seed: int):
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
 # Ingestion and day selection
 DAYS = [

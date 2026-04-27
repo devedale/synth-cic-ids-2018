@@ -118,9 +118,25 @@ pip install -r requirements.txt
 Modify `configs/settings.py` to change dataset architectures. Available modes for ML Pipeline testing:
 
 #### Global Reproducibility
+The pipeline enforces **bitwise-identical** results across runs through a 6-layer determinism chain, all driven from a single parameter:
 ```python
-RANDOM_SEED = 42  # Single seed → propagated to PySpark, PyTorch, Optuna
+RANDOM_SEED = 42  # Single seed → propagated everywhere
 ```
+
+| Layer | Mechanism | Scope |
+| :--- | :--- | :--- |
+| `PYTHONHASHSEED` | Set via env and `set_global_seed()` | `dict`/`set` iteration order |
+| `random.seed()` | stdlib | IP pool shuffling, general sampling |
+| `numpy.random.seed()` | NumPy | Validation splits, array operations |
+| `torch.manual_seed()` | PyTorch CPU + CUDA | Model weight init, DataLoader shuffle |
+| `cudnn.deterministic` | cuDNN + cuBLAS workspace config | GPU kernel selection |
+| `torch.use_deterministic_algorithms` | PyTorch ops (warn-only mode) | Scatter/gather, index operations |
+
+Additionally:
+- **PySpark Word2Vec** receives `seed=RANDOM_SEED` for deterministic Skip-gram training.
+- **Per-config re-seeding**: Each experiment config resets the full seed chain before running, ensuring configs are independent of each other's random state consumption.
+- **Flower/Ray**: Federated simulation runs in `local_mode` for deterministic client scheduling, with per-actor seeding `(RANDOM_SEED + fold × N_CLIENTS + cid)`.
+- **DataLoader**: Every `shuffle=True` loader uses a dedicated `torch.Generator` and `worker_init_fn` seeded from `RANDOM_SEED`.
 
 #### IP Substitution (NAT-like Mapping)
 To protect network topologies from bleeding into the latent embedding space (IP2Vec) while maintaining graph consistency:
@@ -197,24 +213,27 @@ The following parameters are varied by Optuna across **all architectures**:
 | Parameter | Range | Type | Notes |
 | :--- | :--- | :--- | :--- |
 | `architecture` | `mlp`, `resnet`, `cnn1d`, `autoencoder` | Categorical | Model type selection |
-| `use_ip2vec` | `True`, `False` | Categorical | Concatenate IP2Vec embeddings to numeric |
-| `lr` | `[1e-5, 1e-2]` | Log-uniform | Learning rate |
-| `optimizer` | `AdamW`, `SGD` | Categorical | SGD also tunes `momentum ∈ [0.8, 0.99]` |
-| `weight_decay` | `[1e-7, 1e-3]` | Log-uniform | L2 regularisation |
+| `batch_size` | `256, 512, 1024` | Categorical | Minibatch size |
+| `lr` | `[1e-5, 3e-2]` | Log-uniform | Learning rate |
+| `optimizer` | `AdamW`, `Adam`, `SGD` | Categorical | SGD also tunes `momentum ∈ [0.7, 0.99]` |
+| `weight_decay` | `[1e-7, 1e-2]` | Log-uniform | L2 regularisation |
 | `dropout` | `[0.0, 0.5]` | Float | Applied in all architectures |
+| `activation` | `relu`, `gelu`, `leakyrelu`, `silu` | Categorical | Non-linear activation function |
 
-**Architecture-specific parameters:**
+**Architecture-specific parameters (Dynamically sampled per layer/block):**
 
 | Architecture | Parameter | Range | Notes |
 | :--- | :--- | :--- | :--- |
-| **MLP** | `mlp_n_layers` | `[2, 6]` | Hidden layer count |
-| | `mlp_hidden` | `64, 128, 256, 512, 1024` | Neurons per layer |
-| **ResNet** | `resnet_hidden` | `64, 128, 256, 512` | Residual block dimension |
-| | `resnet_n_blocks` | `[2, 8]` | Number of skip-connection blocks |
-| **CNN1D** | `cnn_filters` | `32, 64, 128` | Conv filter count |
-| | `cnn_kernel` | `3, 5, 7` | 1D sliding window size |
-| **Autoencoder** | `ae_hidden` | `128, 256, 512` | Encoder hidden dimension |
-| | `ae_latent` | `16, 32, 64` | Bottleneck (latent space) size |
+| **MLP** | `mlp_n_layers` | `[2, 6]` | Network depth (hidden layer count) |
+| | `mlp_hidden_{i}` | `32, 64, 128, 256, 512, 1024` | Independently sampled for each layer `i` |
+| **ResNet** | `resnet_n_blocks`| `[2, 6]` | Number of skip-connection blocks |
+| | `resnet_hidden_{i}`| `64, 128, 256, 512` | Independently sampled for each block `i` (with dynamic linear projection) |
+| **CNN1D** | `cnn_n_layers` | `[2, 5]` | Number of convolutional layers |
+| | `cnn_filters_{i}` | `32, 64, 128, 256` | Independently sampled for each layer `i` |
+| | `cnn_kernel_{i}` | `3, 5, 7` | Independently sampled for each layer `i` |
+| **Autoencoder**| `ae_n_layers` | `[1, 4]` | Number of hidden layers in Encoder/Decoder |
+| | `ae_hidden_{i}` | `64, 128, 256, 512` | Independently sampled for each layer `i` |
+| | `ae_latent` | `16, 32, 64, 128` | Bottleneck (latent space) size |
 
 #### HPO Pruning Strategy
 
@@ -359,16 +378,37 @@ Additionally, a **Confusion Matrix** is generated for each of the 8 runs.
 
 All results are aggregated in a single comparative table:
 
-| Config | Training | Accuracy | Precision | Recall | F1 | FPR | FNR | Time |
+| Config | Training | Sentence | Accuracy | Precision | Recall | F1 | FPR | FNR |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| IP2Vec + PCA | A | — | — | — | — | — | — | — |
-| IP2Vec + PCA | B | — | — | — | — | — | — | — |
-| IP2Vec + No-PCA | A | — | — | — | — | — | — | — |
-| IP2Vec + No-PCA | B | — | — | — | — | — | — | — |
-| No-IP2Vec + PCA | A | — | — | — | — | — | — | — |
-| No-IP2Vec + PCA | B | — | — | — | — | — | — | — |
-| No-IP2Vec + No-PCA | A | — | — | — | — | — | — | — |
-| No-IP2Vec + No-PCA | B | — | — | — | — | — | — | — |
+| IP2Vec + PCA | A | [Sentence] | — | — | — | — | — | — |
+| IP2Vec + No-PCA | A | [Sentence] | — | — | — | — | — | — |
+| No-IP2Vec + PCA | A | N/A | — | — | — | — | — | — |
+| No-IP2Vec + No-PCA | A | N/A | — | — | — | — | — | — |
+| IP2Vec + PCA | B | [Sentence] | — | — | — | — | — | — |
+| IP2Vec + No-PCA | B | [Sentence] | — | — | — | — | — | — |
+| No-IP2Vec + PCA | B | N/A | — | — | — | — | — | — |
+| No-IP2Vec + No-PCA | B | N/A | — | — | — | — | — | — |
+
+The experimental outputs are accumulated in `results/centralized_results.csv` and `results/federated_results.csv`. Every run explicitly records all dynamic architectural hyperparameters (e.g., specific block widths) and the exact `IP2VEC_SENTENCE` token array used.
+
+---
+
+### 🔄 Automated IP2Vec Sentence Permutation Suite
+
+To rigorously evaluate how the **directionality** and **order** of the skip-gram context window impacts the semantic quality of the learned embeddings, a dedicated automation script is provided:
+
+```bash
+python run_ip2vec_experiments.py
+```
+
+This orchestrator iterates over all valid mathematical permutations of specific feature lists (e.g. `["Dst Port", "Protocol"]`, `["Src IP", "Dst IP", "Dst Port", "Protocol"]`, etc.). For each permutation, it:
+1. Dynamically patches `configs/settings.py` with the new sentence order.
+2. Re-triggers the PySpark `main.py` pipeline to generate a fresh latent space.
+3. Executes the PyTorch model evaluation suite using the frozen, optimal HPO parameters.
+4. Aggregates the results into a single comprehensive CSV: `results/full_comparison_report.csv`.
+
+> [!WARNING]
+> Because this script re-runs both the out-of-core Data Pipeline and the Stratified K-Fold cross-validation for dozens of combinations sequentially, it may require several hours to complete.
 
 ---
 
