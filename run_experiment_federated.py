@@ -90,6 +90,8 @@ class SaveModelStrategy(fl.server.strategy.FedAvg):
         self.history = {"loss": [], "val_loss": [], "val_auc": []}
 
     def aggregate_fit(self, server_round, results, failures):
+        # Sort results by CID to guarantee deterministic floating point aggregation order
+        results = sorted(results, key=lambda x: str(x[0].cid))
         aggregated_weights, metrics_aggregated = super().aggregate_fit(server_round, results, failures)
         if aggregated_weights is not None:
             parameters = fl.common.parameters_to_ndarrays(aggregated_weights)

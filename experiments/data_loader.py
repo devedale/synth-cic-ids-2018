@@ -57,12 +57,21 @@ def _load_pandas(cfg: ExperimentConfig, sample_frac: float, seed: int, app_name:
     spark.sparkContext.setLogLevel("ERROR")
 
     df = spark.read.parquet(str(cfg.parquet_path))
-    if sample_frac < 1.0:
-        df = df.sample(fraction=sample_frac, seed=seed)
 
     print(f"[{cfg.name}] Collecting {df.count():,} rows to Pandas...")
     pdf = df.toPandas()
     spark.stop()
+    
+    # ── Enforce Determinism ──
+    # PySpark parquet reading is NOT ordered. We must sort by scalar columns to guarantee 
+    # the exact same row order every time before we split/sample in sklearn/PyTorch.
+    sort_cols = [c for c in pdf.columns if c not in ["ip2vec_embeddings", "features", "pca_features"]]
+    pdf = pdf.sort_values(by=sort_cols).reset_index(drop=True)
+
+    if sample_frac < 1.0:
+        pdf = pdf.sample(frac=sample_frac, random_state=seed).reset_index(drop=True)
+        print(f"[{cfg.name}] Sampled to {len(pdf):,} rows")
+
     return pdf
 
 

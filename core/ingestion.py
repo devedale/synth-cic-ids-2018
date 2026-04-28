@@ -152,10 +152,11 @@ class Ingestion:
         print(f"[ingestion] Fetched {len(all_ips)} unique {feed_type} IPs. Saving to local cache.")
         
         cache_file.parent.mkdir(parents=True, exist_ok=True)
+        sorted_ips = sorted(list(all_ips))
         with open(cache_file, "w") as f:
-            json.dump(list(all_ips), f)
+            json.dump(sorted_ips, f)
             
-        return list(all_ips)
+        return sorted_ips
 
     def _day_cache_dir(self, day: str) -> Path:
         return self.cache_dir / day
@@ -271,7 +272,9 @@ class Ingestion:
         # Tag origin day for ML statistics loader tracking before saving RAW block
         df_processed = df_processed.withColumn("_source_day", F.lit(day))
         
-        df_processed.repartition(150).write.mode("overwrite").parquet(str(day_cache / "unified_records.parquet"))
+        # Repartition by a deterministic hash to prevent Round-Robin partition variations
+        df_processed = df_processed.withColumn("_rep_hash", F.xxhash64(*df_processed.columns))
+        df_processed.repartition(150, "_rep_hash").drop("_rep_hash").write.mode("overwrite").parquet(str(day_cache / "unified_records.parquet"))
             
         print(f"[ingestion] Saved unified Spark Parquet partition for day {day}\n")
 

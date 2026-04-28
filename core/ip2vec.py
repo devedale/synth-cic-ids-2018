@@ -112,11 +112,16 @@ def compute_ip2vec_embeddings(df: DataFrame, context_columns: List[str], vector_
         inputCol="ip2vec_sequence", 
         outputCol="ip2vec_embeddings",
         windowSize=2,
-        numPartitions=4,
+        numPartitions=1,  # Set to 1 to disable Hogwild asynchronous thread race conditions
         seed=RANDOM_SEED,
     )
     
-    model = word2vec.fit(df)
+    # Sort DataFrame globally to ensure deterministic Word2Vec input order
+    df = df.withColumn("_sort_hash", F.xxhash64(*df.columns))
+    sorted_df = df.orderBy("_sort_hash")
+    
+    model = word2vec.fit(sorted_df)
+    df = df.drop("_sort_hash")
     
     from configs.settings import MODELS_DIR
     MODELS_DIR.mkdir(parents=True, exist_ok=True)

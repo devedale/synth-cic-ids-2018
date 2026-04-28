@@ -74,11 +74,20 @@ def get_dataset(df: DataFrame, strategy: str = "raw", target_benign_ratio: float
         else:
             b_sample_frac = 1.0 # Already weighted towards attacks or balanced
             
-        # 4. Filter and sample. Note: we use a filter + union or a sampleBy on a temp column.
-        # sampleBy is efficient:
-        sampled_df = df_binary.sampleBy("is_benign", {True: b_sample_frac, False: 1.0}, seed=RANDOM_SEED)
+        # 4. Filter and sample deterministically using row hashing
+        # PySpark's sampleBy relies on partition order which is non-deterministic.
+        # We generate a deterministic pseudo-random float [0.0, 1.0] from row contents.
+        df_binary = df_binary.withColumn(
+            "_rand_val", 
+            F.abs(F.xxhash64(F.lit(RANDOM_SEED), *df.columns)) / F.lit(9223372036854775807)
+        )
         
-        return sampled_df.drop("is_benign")
+        sampled_df = df_binary.filter(
+            (F.col("is_benign") == False) | 
+            ((F.col("is_benign") == True) & (F.col("_rand_val") <= b_sample_frac))
+        )
+        
+        return sampled_df.drop("is_benign", "_rand_val")
         
     else:
         raise ValueError(f"Unknown Strategy: {strategy}. Choose from 'raw', 'unsupervised', 'binary_collapse', 'undersample_majority'.")

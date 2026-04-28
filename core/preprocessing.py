@@ -52,7 +52,11 @@ def preprocess_spark(
         total_rows = df.count()
         if total_rows > sample_size:
             fraction = min(1.0, sample_size / total_rows)
-            df = df.sample(withReplacement=False, fraction=fraction, seed=RANDOM_SEED)
+            df = df.withColumn(
+                "_rand_val", 
+                F.abs(F.xxhash64(F.lit(RANDOM_SEED), *df.columns)) / F.lit(9223372036854775807)
+            )
+            df = df.filter(F.col("_rand_val") <= fraction).drop("_rand_val")
 
     # ── Label Preservation ──────────────────────────────────────────────────────
     # We leave the 'Label' column as strings. This allows the subsequent 
